@@ -1,0 +1,16 @@
+---
+source: src/tui/view.rs
+expression: draw(&mut app)
+---
+" Fonts   Collections   Editing: Brand                                           "
+" ▸ [ ] Foundry A  0/3                                                           "
+" ▾ [~] Foundry B  1/2                                                           "
+"     [x] Antiqua.otf  Antiqua Regular                                           "
+"     [ ] Broken.ttf  unreadable                                                 "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" Editing Brand. Space adds or removes fonts. Esc when done.                     "
+" space add/remove  ←→ close/open  a-z jump  / search  esc done                  "

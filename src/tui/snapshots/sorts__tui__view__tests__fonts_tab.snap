@@ -1,0 +1,16 @@
+---
+source: src/tui/view.rs
+expression: draw(&mut app)
+---
+" Fonts   Collections                                                            "
+" ▾ [~] Foundry A  2/3                                                           "
+"   ▾ [x] Sans  2/2                                                              "
+"       [x] Sans-Bold.otf  Sans Bold                                             "
+"       [x] Sans-Regular.otf  Sans Regular                                       "
+"   ▸ [ ] Serif  0/1                                                             "
+" ▸ [ ] Foundry B  0/2                                                           "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" Enabled Foundry A/Sans/. Registered 2, unregistered 0.                         "
+" space toggle  ←→ close/open  a-z jump  / search  tab collections  ctrl-c quit  "

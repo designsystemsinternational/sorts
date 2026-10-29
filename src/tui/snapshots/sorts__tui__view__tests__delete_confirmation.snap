@@ -1,0 +1,16 @@
+---
+source: src/tui/view.rs
+expression: draw(&mut app)
+---
+" Fonts   Collections                                                            "
+" [ ] Brand  1 entry                                                             "
+" [ ] Editorial  0 entries                                                       "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" Delete collection "Brand" for the whole team? y/n                              "
+" y delete  any other key cancels                                                "
