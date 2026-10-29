@@ -39,6 +39,7 @@ src/
   sync.rs        Reconciliation plan + apply.
   activator.rs   FontActivator trait, FakeActivator, FileFakeActivator, CoreTextActivator.
   testing.rs     Generates complete TrueType test fonts (also used by tests/).
+  typefaces.rs   Groups the fonts of a list of entries by family (typeface name + style count).
   tree.rs        Folder tree for the TUI: rows (expand + search filter) and set_enabled (toggle → entries).
   tui/mod.rs     App: all TUI state and key handling. Tested with key events.
   tui/view.rs    Drawing. Tested with ratatui TestBackend + insta snapshots (tui/snapshots/).
@@ -244,6 +245,8 @@ Built (roadmap step 3). A tree that mirrors the folder structure (see the snapsh
 
 Built (roadmap step 4). A second tab lists the collections, sorted by file name.
 
+Each row shows "N typefaces". A read-only right column shows the typefaces of the selected collection: "Name (N styles)", sorted case-insensitively. A style is a unique PostScript name, so an `.otf` + `.ttf` pair counts once. Unreadable files show as one "Unreadable (N files)" line at the end. If the list is too long, the last line is "… and N more". An empty collection shows "No fonts. Press e to add some."
+
 - `space`: enable / disable the collection in the personal settings.
 - `n`: create. A prompt in the message line asks for the name. The file is `<slug>.json` with a new UUID `id` and no fonts.
 - `r`: rename. The prompt starts with the current name. The file moves to the new slug; the `id`, the fonts, and everyone's enabled state stay.
@@ -271,7 +274,7 @@ Measured on a shared Google Drive folder with several thousand desktop fonts (Oc
 2. **Rust project** (done): `init`, personal settings, scanner, active set calculation, `formatOrder`, `sync`, `status`.
 3. **Interactive list** (done): tree, search, toggles.
 4. **Collections** (done): list, enable/disable, create, rename, delete, edit.
-5. **Distribution** (prepared): Homebrew tap, build from source. Files: `packaging/homebrew/sorts.rb.template`, `scripts/update-formula.sh`, `.github/workflows/ci.yml`, `README.md`, `docs/RELEASING.md`.
+5. **Distribution** (prepared): Homebrew tap, build from source. Files: `packaging/homebrew/sorts.rb.template`, `scripts/release.sh` (interactive release: bump, check, tag, push, tap), `scripts/update-formula.sh`, `.github/workflows/ci.yml`, `README.md`, `docs/RELEASING.md`.
 6. **Team migration** (done).
 
 ## Distribution facts (October 2026, Homebrew 7.0.11)

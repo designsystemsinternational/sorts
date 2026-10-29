@@ -1,0 +1,11 @@
+---
+source: src/tui/view.rs
+expression: "draw_sized(&mut app, 80, 7)"
+---
+" Fonts   Collections                                                            "
+" [ ] All  3 typefaces           │ All                                           "
+" [ ] Brand  1 typeface          │ Antiqua (1 style)                             "
+" [ ] Editorial  0 typefaces     │ Sans (2 styles)                               "
+"                                │ … and 2 more                                  "
+"                                                                                "
+" space enable/disable  e edit  n new  r rename  d delete  ctrl-c quit           "

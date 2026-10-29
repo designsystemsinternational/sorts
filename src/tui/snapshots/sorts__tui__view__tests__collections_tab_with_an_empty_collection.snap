@@ -1,0 +1,16 @@
+---
+source: src/tui/view.rs
+expression: draw(&mut app)
+---
+" Fonts   Collections                                                            "
+" [ ] Brand  1 typeface          │ Editorial                                     "
+" [ ] Editorial  0 typefaces     │ No fonts. Press e to add some.                "
+"                                │                                               "
+"                                │                                               "
+"                                │                                               "
+"                                │                                               "
+"                                │                                               "
+"                                │                                               "
+"                                │                                               "
+"                                                                                "
+" space enable/disable  e edit  n new  r rename  d delete  ctrl-c quit           "

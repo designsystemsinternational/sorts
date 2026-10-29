@@ -10,3 +10,4 @@ pub mod sync;
 pub mod testing;
 pub mod tree;
 pub mod tui;
+pub mod typefaces;

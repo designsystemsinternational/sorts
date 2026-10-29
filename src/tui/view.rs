@@ -2,11 +2,12 @@
 
 use super::{App, Input, Mark, Prompt, Tab};
 use crate::tree::Kind;
+use crate::typefaces::typefaces;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, Paragraph};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 
 pub fn render(app: &mut App, frame: &mut Frame) {
     let [header, body, message, help] =
@@ -23,8 +24,11 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             frame.render_widget(Paragraph::new(" No collections. Press n to create one.").dim(), body);
         }
         Tab::Collections => {
+            let [left, right] = Layout::horizontal([Constraint::Percentage(40), Constraint::Fill(1)]).areas(body);
             let items = collection_items(app);
-            frame.render_stateful_widget(list(items), body, &mut app.collection_list);
+            frame.render_stateful_widget(list(items), left, &mut app.collection_list);
+            let lines = typeface_lines(app, right.height as usize);
+            frame.render_widget(Paragraph::new(lines).block(Block::new().borders(Borders::LEFT)), right);
         }
     }
     frame.render_widget(message_line(app), message);
@@ -72,7 +76,7 @@ fn help_line(app: &App) -> Line<'static> {
         None if app.tab == Tab::Fonts => {
             " space toggle  ←→ close/open  a-z jump  / search  tab collections  ctrl-c quit"
         }
-        None => " space on/off  e edit  n new  r rename  d delete  ctrl-c quit",
+        None => " space enable/disable  e edit  n new  r rename  d delete  ctrl-c quit",
     };
     Line::from(text).dim()
 }
@@ -135,25 +139,67 @@ fn collection_items(app: &App) -> Vec<ListItem<'static>> {
         .iter()
         .map(|collection| {
             let on = app.context.settings.enabled_collections.contains(&collection.id);
-            let count = collection.fonts.len();
+            let count = typefaces(&app.context.library, &collection.fonts).items.len();
             ListItem::new(Line::from(vec![
                 Span::from(format!(" {} {}", if on { "[x]" } else { "[ ]" }, collection.name)),
-                Span::from(format!("  {count} {}", if count == 1 { "entry" } else { "entries" })).dim(),
+                Span::from(format!("  {}", plural(count, "typeface"))).dim(),
             ]))
         })
         .collect()
 }
 
+/// "1 style", "2 styles".
+fn plural(count: usize, word: &str) -> String {
+    format!("{count} {word}{}", if count == 1 { "" } else { "s" })
+}
+
+/// The typefaces of the selected collection, at most `height` lines.
+fn typeface_lines(app: &App, height: usize) -> Vec<Line<'static>> {
+    let Some(collection) = app.selected_collection() else { return vec![] };
+    let mut lines = vec![Line::from(format!(" {}", collection.name)).bold()];
+    let typefaces = typefaces(&app.context.library, &collection.fonts);
+    if typefaces.items.is_empty() && typefaces.unreadable == 0 {
+        lines.push(Line::from(" No fonts. Press e to add some.").dim());
+        return lines;
+    }
+    let mut rows: Vec<Line<'static>> = typefaces
+        .items
+        .iter()
+        .map(|t| {
+            Line::from(vec![
+                Span::from(format!(" {} ", t.name)),
+                Span::from(format!("({})", plural(t.styles, "style"))).dim(),
+            ])
+        })
+        .collect();
+    if typefaces.unreadable > 0 {
+        rows.push(Line::from(format!(" Unreadable ({})", plural(typefaces.unreadable, "file"))).red());
+    }
+    let room = height.saturating_sub(1);
+    if rows.len() > room {
+        let more = rows.len() - room.saturating_sub(1);
+        rows.truncate(room.saturating_sub(1));
+        rows.push(Line::from(format!(" … and {more} more")).dim());
+    }
+    lines.extend(rows);
+    lines
+}
+
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{fixture, open, press, type_text};
+    use super::super::tests::{Fixture, fixture, open, press, type_text};
     use super::*;
+    use crate::app::Context;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::KeyCode;
 
     fn draw(app: &mut App) -> String {
-        let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
+        draw_sized(app, 80, 12)
+    }
+
+    fn draw_sized(app: &mut App, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal.draw(|frame| render(app, frame)).unwrap();
         terminal.backend().to_string()
     }
@@ -196,6 +242,39 @@ mod tests {
         press(&mut app, KeyCode::Tab);
         press(&mut app, KeyCode::Char(' '));
         insta::assert_snapshot!(draw(&mut app));
+    }
+
+    /// Opens the fixture with an extra collection "All" that includes both foundries.
+    fn open_with_all_collection(f: &Fixture) -> App {
+        let root = Context::load(&f.config).unwrap().library.root;
+        let json = br#"{"id": "c0", "name": "All", "fonts": ["Foundry A/", "Foundry B/"]}"#;
+        crate::testing::write_file(&root, ".sorts/collections/all.json", json);
+        open(f)
+    }
+
+    #[test]
+    fn collections_tab_shows_the_typefaces_of_the_selected_collection() {
+        let f = fixture();
+        let mut app = open_with_all_collection(&f);
+        press(&mut app, KeyCode::Tab);
+        insta::assert_snapshot!(draw(&mut app));
+    }
+
+    #[test]
+    fn collections_tab_with_an_empty_collection() {
+        let f = fixture();
+        let mut app = open(&f);
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Down);
+        insta::assert_snapshot!(draw(&mut app));
+    }
+
+    #[test]
+    fn collections_tab_with_more_typefaces_than_rows() {
+        let f = fixture();
+        let mut app = open_with_all_collection(&f);
+        press(&mut app, KeyCode::Tab);
+        insta::assert_snapshot!(draw_sized(&mut app, 80, 7));
     }
 
     #[test]
