@@ -19,11 +19,21 @@ pub fn plan(desired: &BTreeSet<PathBuf>, state: &State) -> (Vec<PathBuf>, Vec<Pa
 
 /// Unregisters first (to free PostScript names), then registers. Updates `state`.
 ///
+/// Registers every desired font again, also the fonts in the state: the system can lose or
+/// disable a registration, and registering is idempotent. Only new fonts are reported.
+///
 /// A font that fails to unregister stays in the state so the next sync retries it,
 /// unless the file no longer exists.
 pub fn apply(desired: &BTreeSet<PathBuf>, state: &mut State, activator: &mut dyn FontActivator) -> SyncReport {
     let (to_register, to_unregister) = plan(desired, state);
-    run(to_register, to_unregister, state, activator)
+    let known: Vec<PathBuf> = desired.intersection(&state.registered).cloned().collect();
+    let mut report = run(to_register, to_unregister, state, activator);
+    for path in known {
+        if let Err(error) = activator.register(&path) {
+            report.errors.push((path, error));
+        }
+    }
+    report
 }
 
 /// Applies only the difference between two active sets. Used by toggles in the interactive
@@ -107,6 +117,20 @@ mod tests {
         assert_eq!(state, self::state(&["/a.otf", "/b.otf"]));
         // Fonts that the CLI did not register are never touched.
         assert_eq!(activator.registered, paths(&["/a.otf", "/b.otf", "/other-app.otf"]));
+    }
+
+    #[test]
+    fn apply_registers_desired_fonts_again_even_if_the_state_has_them() {
+        // The system can lose or disable a registration (e.g. another font manager disabled the font).
+        let mut activator = FakeActivator::default();
+        let mut state = state(&["/a.otf"]);
+
+        let report = apply(&paths(&["/a.otf"]), &mut state, &mut activator);
+
+        assert_eq!(activator.registered, paths(&["/a.otf"]));
+        // Only new fonts are reported.
+        assert!(report.registered.is_empty());
+        assert_eq!(state, self::state(&["/a.otf"]));
     }
 
     #[test]

@@ -2,7 +2,8 @@
 
 use objc2_core_foundation::{CFArray, CFError, CFRetained, CFString, CFURL};
 use objc2_core_text::{
-    CTFontManagerCopyAvailablePostScriptNames, CTFontManagerRegisterFontsForURL, CTFontManagerScope,
+    CTFontManagerCopyAvailablePostScriptNames, CTFontManagerCreateFontDescriptorsFromURL,
+    CTFontManagerEnableFontDescriptors, CTFontManagerRegisterFontsForURL, CTFontManagerScope,
     CTFontManagerUnregisterFontsForURL,
 };
 use std::collections::BTreeSet;
@@ -99,6 +100,11 @@ impl CoreTextActivator {
         Self { scope: CTFontManagerScope::Process }
     }
 
+    /// Registrations that end at logout. Used by tests that need a disabled registration.
+    pub fn session() -> Self {
+        Self { scope: CTFontManagerScope::Session }
+    }
+
     fn call(
         &self,
         path: &Path,
@@ -126,12 +132,28 @@ const ALREADY_REGISTERED: isize = 105;
 const NOT_REGISTERED: isize = 201;
 
 impl FontActivator for CoreTextActivator {
+    /// Also enables the font, because a font that another app disabled stays unavailable.
     fn register(&mut self, path: &Path) -> Result<(), String> {
-        self.call(path, CTFontManagerRegisterFontsForURL, ALREADY_REGISTERED)
+        self.call(path, CTFontManagerRegisterFontsForURL, ALREADY_REGISTERED)?;
+        set_enabled(path, true);
+        Ok(())
     }
 
+    /// Enables the font first, because CoreText cannot unregister a disabled font.
     fn unregister(&mut self, path: &Path) -> Result<(), String> {
+        set_enabled(path, true);
         self.call(path, CTFontManagerUnregisterFontsForURL, NOT_REGISTERED)
+    }
+}
+
+/// Enables or disables the registered fonts in a file. Other font managers (e.g. RightFont)
+/// disable fonts instead of unregistering them, and macOS keeps a disabled font unavailable
+/// even after a new registration.
+pub fn set_enabled(path: &Path, enable: bool) {
+    let Some(url) = CFURL::from_file_path(path) else { return };
+    if let Some(descriptors) = unsafe { CTFontManagerCreateFontDescriptorsFromURL(&url) } {
+        // SAFETY: CoreText documents the array as containing CTFontDescriptors.
+        unsafe { CTFontManagerEnableFontDescriptors(&descriptors, enable) };
     }
 }
 

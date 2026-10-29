@@ -179,6 +179,8 @@ The UI does **not** label these files as "duplicates". The format order is simpl
 - CoreText errors to treat as success (the operation is idempotent for the CLI):
   - register: "The file has already been registered in the specified scope." (`kCTFontManagerErrorAlreadyRegistered`, 105)
   - unregister: "The file is not registered in the specified scope." (`kCTFontManagerErrorNotRegistered`, 201)
+- **Disabled fonts.** Other font managers (e.g. RightFont) and Font Book disable fonts instead of unregistering them (`CTFontManagerEnableFontDescriptors(..., false)`, stored in `~/Library/Preferences/com.apple.FontRegistry.user.plist` under `DisabledFonts`). A disabled font stays unavailable after a new register (error 105), and unregister fails with 201. So `CoreTextActivator::register` enables the font after it registers it, and `unregister` enables it first. Never edit the plist directly; `fontd` owns it.
+- Tests for disabled fonts use `CTFontManagerScope::Session` (`CoreTextActivator::session()`), because the process scope does not keep a disabled registration. Session registrations end at logout and do not write the plist.
 - Fallback (not needed so far): symlinks in `~/Library/Fonts`.
 
 ### Activation test results (October 2026)
@@ -191,6 +193,7 @@ Test font: one `.otf` file in a Google Drive Fonts folder.
 - Unregister: works. The font disappears from new processes and from AppKit.
 - Register twice / unregister twice: fails with the errors above.
 - **Still to verify by the user:** the font stays active after a restart, and it appears in Figma and Adobe apps.
+- Fonts registered with persistent scope show in the macOS font list (`system_profiler SPFontsDataType`, the list Font Book reads) and disappear from it when they are unregistered. Not checked in the Font Book window itself.
 
 ## Sync behavior
 
@@ -199,7 +202,7 @@ Test font: one `.otf` file in a Google Drive Fonts folder.
 - `sync` does the reconciliation:
   1. Scan the Fonts folder and the collection files.
   2. Calculate the active set from the personal settings and apply `formatOrder`.
-  3. Register fonts that are in the active set but not registered.
+  3. Register all fonts in the active set, also the fonts in the state file (the system can lose or disable a registration). Only new fonts are reported.
   4. Unregister fonts that the CLI registered but are no longer in the active set.
 - No interval sync, no LaunchAgent, no file watcher in version 1. These can come later.
 

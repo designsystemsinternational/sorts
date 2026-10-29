@@ -116,6 +116,11 @@ Fonts folder, run:
 sorts sync
 ```
 
+`sync` also turns on fonts that another font manager (or Font Book) turned off.
+If a font from your Fonts folder is missing in an app, run `sorts sync`. Do not
+turn sorts fonts off in Font Book, and never use "Remove" there: Font Book can
+move the font file to the Trash, which deletes it from the shared folder.
+
 `sorts status` shows the Fonts folder, counts, and problems (unreadable files,
 settings that point to fonts that no longer exist).
 
