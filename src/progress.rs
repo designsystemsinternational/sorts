@@ -11,6 +11,9 @@ const REDRAW_INTERVAL: Duration = Duration::from_millis(100);
 /// The time between two calls of [`Progress::tick`] from the timer thread.
 pub const TICK_INTERVAL: Duration = Duration::from_millis(250);
 
+/// A walk without events for this time waits for a folder listing from the file sync app. The line then says so.
+const WAIT_HINT: Duration = Duration::from_secs(10);
+
 pub const OFFLINE_TIP: &str =
     "Tip: Make the Fonts folder available offline in your file sync app. Then sorts does not download the files again.";
 
@@ -29,6 +32,10 @@ struct Inner<W> {
     found: usize,
     /// The folder that the walk lists now.
     folder: String,
+    /// The time of the last event of the walk.
+    last_walk: Option<Instant>,
+    /// True after [`OFFLINE_TIP`] was shown, so it shows only once.
+    tip_shown: bool,
     /// Set when the walk is complete: the number of font files to read.
     reading: Option<usize>,
     read: usize,
@@ -45,6 +52,8 @@ impl<W: Write + Send> Progress<W> {
             out,
             found: 0,
             folder: String::new(),
+            last_walk: None,
+            tip_shown: false,
             reading: None,
             read: 0,
             files: 0,
@@ -71,10 +80,12 @@ impl<W: Write + Send> Progress<W> {
         let force = match event {
             ScanEvent::Folder { id, .. } => {
                 inner.folder = id;
+                inner.last_walk = Some(now);
                 false
             }
             ScanEvent::Found { count, .. } => {
                 inner.found = count;
+                inner.last_walk = Some(now);
                 false
             }
             ScanEvent::Downloading { files, bytes } => {
@@ -124,6 +135,14 @@ impl<W: Write + Send> Progress<W> {
             download_line(inner.done_files, inner.files, inner.done_bytes, inner.bytes, elapsed)
         } else if let Some(files) = inner.reading {
             reading_line(inner.read, files, elapsed)
+        } else if let waited = now.saturating_duration_since(inner.last_walk.unwrap_or(self.start))
+            && waited >= WAIT_HINT
+        {
+            if !inner.tip_shown {
+                let _ = writeln!(inner.out, "\r\x1b[2K{OFFLINE_TIP}");
+                inner.tip_shown = true;
+            }
+            waiting_line(&inner.folder, waited)
         } else {
             scanning_line(inner.found, elapsed, &inner.folder)
         };
@@ -141,7 +160,10 @@ impl<W: Write + Send> Progress<W> {
         }
         if inner.files > 0 {
             let line = format!("Downloaded {} ({}).", files_text(inner.files), megabytes(inner.bytes));
-            let _ = writeln!(inner.out, "{line}\n{OFFLINE_TIP}");
+            let _ = writeln!(inner.out, "{line}");
+            if !inner.tip_shown {
+                let _ = writeln!(inner.out, "{OFFLINE_TIP}");
+            }
         }
         let _ = inner.out.flush();
     }
@@ -173,6 +195,12 @@ pub fn scanning_line(found: usize, elapsed: Duration, folder: &str) -> String {
     let found = if found == 1 { "1 font file".into() } else { format!("{found} font files") };
     let line = format!("Scanning: {found} found, {}", elapsed_text(elapsed));
     if folder.is_empty() { line } else { format!("{line}, in {folder}") }
+}
+
+/// The line while the walk waits for the listing of `folder` (empty for the root) for the time `waited`.
+pub fn waiting_line(folder: &str, waited: Duration) -> String {
+    let folder = if folder.is_empty() { "the Fonts folder" } else { folder };
+    format!("Waiting for {folder} to load from your file sync app, {}", elapsed_text(waited))
 }
 
 pub fn reading_line(read: usize, files: usize, elapsed: Duration) -> String {
@@ -331,5 +359,70 @@ mod tests {
             "\r\x1b[2KScanning: 0 font files found, 0:00\
              \r\x1b[2KScanning: 2 font files found, 0:07, in Foundry/"
         );
+    }
+
+    fn folder(id: &str) -> ScanEvent {
+        ScanEvent::Folder { id: id.into(), flags: 0 }
+    }
+
+    #[test]
+    fn formats_the_waiting_line() {
+        let s = Duration::from_secs;
+        assert_eq!(waiting_line("A/B/", s(40)), "Waiting for A/B/ to load from your file sync app, 0:40");
+        assert_eq!(waiting_line("", s(10)), "Waiting for the Fonts folder to load from your file sync app, 0:10");
+    }
+
+    #[test]
+    fn a_walk_without_events_shows_the_folder_that_it_waits_for_and_the_tip_once() {
+        let progress = Progress::new(true, 0, Vec::new());
+        let t = |s| progress.start() + Duration::from_secs(s);
+        progress.event_at(folder("Foundry/"), t(0));
+        progress.event_at(folder("Foundry/Slow/"), t(2));
+        progress.tick_at(t(11));
+        progress.tick_at(t(12));
+        progress.tick_at(t(13));
+        progress.event_at(found(1), t(14));
+        progress.tick_at(t(15));
+        progress.finish();
+        let output = String::from_utf8(progress.into_inner()).unwrap();
+        assert_eq!(
+            output,
+            format!(
+                "\r\x1b[2KScanning: 0 font files found, 0:00, in Foundry/\
+                 \r\x1b[2KScanning: 0 font files found, 0:02, in Foundry/Slow/\
+                 \r\x1b[2KScanning: 0 font files found, 0:11, in Foundry/Slow/\
+                 \r\x1b[2K{OFFLINE_TIP}\n\
+                 \r\x1b[2KWaiting for Foundry/Slow/ to load from your file sync app, 0:10\
+                 \r\x1b[2KWaiting for Foundry/Slow/ to load from your file sync app, 0:11\
+                 \r\x1b[2KScanning: 1 font file found, 0:14, in Foundry/Slow/\
+                 \r\x1b[2KScanning: 1 font file found, 0:15, in Foundry/Slow/\
+                 \r\x1b[2K"
+            )
+        );
+    }
+
+    #[test]
+    fn the_tip_shows_only_once_after_a_wait_and_downloads() {
+        let progress = Progress::new(true, 0, Vec::new());
+        let t = |s| progress.start() + Duration::from_secs(s);
+        progress.event_at(folder(""), t(0));
+        progress.tick_at(t(10));
+        for event in downloads() {
+            progress.event_at(event, t(11));
+        }
+        progress.finish();
+        let output = String::from_utf8(progress.into_inner()).unwrap();
+        assert!(output.contains("Waiting for the Fonts folder to load"), "{output:?}");
+        assert_eq!(output.matches(OFFLINE_TIP).count(), 1, "{output:?}");
+        assert!(output.ends_with("\r\x1b[2KDownloaded 2 files (3.0 MB).\n"), "{output:?}");
+    }
+
+    #[test]
+    fn the_wait_has_no_effect_without_a_terminal() {
+        let progress = Progress::new(false, 0, Vec::new());
+        progress.event_at(folder("A/"), progress.start());
+        progress.tick_at(progress.start() + Duration::from_secs(60));
+        progress.finish();
+        assert_eq!(progress.into_inner(), b"");
     }
 }
