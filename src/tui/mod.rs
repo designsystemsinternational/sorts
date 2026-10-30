@@ -107,6 +107,13 @@ pub struct App {
     /// The area of the list in the current tab, from the last draw. Mouse events outside it
     /// are ignored.
     pub list_area: Rect,
+    /// The area of the typeface column in the Collections tab, from the last draw. The mouse
+    /// wheel scrolls it.
+    pub typeface_area: Rect,
+    /// The first typeface row in view, and the ID of the collection it belongs to. The view sets
+    /// the offset back to 0 when another collection is selected.
+    pub typeface_offset: usize,
+    pub typeface_collection: Option<String>,
     /// The areas of the tab titles in the header, from the last draw.
     pub tab_areas: Vec<(Tab, Rect)>,
     /// True after a mouse scroll, until the next key. Then the view can show rows without the
@@ -145,6 +152,9 @@ impl App {
             missing_list: ListState::default(),
             moving: false,
             list_area: Rect::default(),
+            typeface_area: Rect::default(),
+            typeface_offset: 0,
+            typeface_collection: None,
             tab_areas: vec![],
             scrolled: false,
             jump: None,
@@ -261,7 +271,8 @@ impl App {
         Action::Continue
     }
 
-    /// The mouse wheel scrolls the list under the pointer without a change to the selection.
+    /// The mouse wheel scrolls the list under the pointer without a change to the selection. In the
+    /// Collections tab, it also scrolls the typeface column.
     /// A left click selects the row under the pointer, or switches to the tab whose title it hits.
     pub fn handle_mouse(&mut self, mouse: MouseEvent) {
         self.jump = None;
@@ -273,6 +284,15 @@ impl App {
             && let Some((tab, _)) = self.tab_areas.iter().find(|(_, area)| area.contains(position))
         {
             self.click_tab(*tab);
+            return;
+        }
+        if self.typeface_area.contains(position) {
+            // The view stops the offset when the last row is at the bottom.
+            match mouse.kind {
+                MouseEventKind::ScrollDown => self.typeface_offset += SCROLL_LINES,
+                MouseEventKind::ScrollUp => self.typeface_offset = self.typeface_offset.saturating_sub(SCROLL_LINES),
+                _ => {}
+            }
             return;
         }
         let area = self.list_area;
@@ -1254,6 +1274,58 @@ mod tests {
     }
 
     #[test]
+    fn the_mouse_wheel_over_the_typefaces_scrolls_them() {
+        let f = fixture();
+        let mut app = open_with_all_collection(&f);
+        press(&mut app, KeyCode::Tab);
+        draw(&mut app);
+
+        for _ in 0..5 {
+            mouse(&mut app, MouseEventKind::ScrollDown, 70, 2);
+        }
+        assert_eq!(app.typeface_offset, 2); // stops when the last row is at the bottom
+        assert_eq!(selected_collection(&app), "All");
+        assert_eq!(app.collection_list.offset(), 0);
+
+        mouse(&mut app, MouseEventKind::ScrollUp, 70, 2);
+        assert_eq!(app.typeface_offset, 1);
+    }
+
+    #[test]
+    fn the_mouse_wheel_over_the_collection_list_does_not_scroll_the_typefaces() {
+        let f = fixture();
+        let mut app = open_with_all_collection(&f);
+        press(&mut app, KeyCode::Tab);
+        draw(&mut app);
+
+        mouse(&mut app, MouseEventKind::ScrollDown, 5, 2);
+
+        assert_eq!(app.typeface_offset, 0);
+    }
+
+    #[test]
+    fn another_collection_shows_its_typefaces_from_the_top() {
+        let f = fixture();
+        let mut app = open_with_all_collection(&f);
+        press(&mut app, KeyCode::Tab);
+        draw(&mut app);
+        mouse(&mut app, MouseEventKind::ScrollDown, 70, 2);
+
+        press(&mut app, KeyCode::Down);
+        draw(&mut app);
+        assert_eq!(app.typeface_offset, 0);
+
+        press(&mut app, KeyCode::Up); // back to the scrolled collection
+        draw(&mut app);
+        assert_eq!(app.typeface_offset, 0);
+
+        mouse(&mut app, MouseEventKind::ScrollDown, 70, 2);
+        click(&mut app, 5, 2);
+        assert_eq!(selected_collection(&app), "Brand");
+        assert_eq!(app.typeface_offset, 0);
+    }
+
+    #[test]
     fn a_click_on_a_tab_title_switches_to_that_tab() {
         let f = fixture();
         let mut app = open(&f);
@@ -1559,6 +1631,14 @@ mod tests {
 
     /// Opens the fixture with two missing entries: "Old/Sans/" in the personal settings and
     /// "Gone.otf" in the collection Brand.
+    /// Opens the fixture with an extra collection "All" that includes both foundries.
+    pub(crate) fn open_with_all_collection(f: &Fixture) -> App {
+        let root = app::Context::load(&f.config).unwrap().library.root;
+        let json = br#"{"id": "c0", "name": "All", "fonts": ["Foundry A/", "Foundry B/"]}"#;
+        write_file(&root, ".sorts/collections/all.json", json);
+        open(f)
+    }
+
     pub(crate) fn open_with_missing(f: &Fixture) -> App {
         let mut settings = saved_settings(f);
         settings.enabled = vec!["Old/Sans/".into(), "Foundry B/Antiqua.otf".into()];

@@ -1,0 +1,11 @@
+---
+source: src/tui/view.rs
+expression: "draw_sized(&mut app, 80, 7)"
+---
+" Fonts   Collections   Settings                                                 "
+" [ ] All  3 typefaces           │ All                                           "
+" [ ] Brand  1 typeface          │ Sans (2 styles)                               "
+" [ ] Editorial  0 typefaces     │ Serif (1 style)                               "
+"                                │ Unreadable (1 file)                           "
+"                                                                                "
+" Enter : Enable/disable | E : Edit | N : New | R : Rename | D : Delete | Esc : Q"

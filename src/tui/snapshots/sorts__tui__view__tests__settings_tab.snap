@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                                                                "
 "                                                                                "
 "                                                                                "
-" enter pick up and move  ↑↓ select  tab fonts  esc quit                         "
+" Enter : Pick up and move | ↑↓ : Select | Tab : Fonts | Esc : Quit              "

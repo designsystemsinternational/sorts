@@ -18,6 +18,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     frame.render_widget(header_line(app), header);
     app.tab_areas = tab_areas(header, &app.tabs());
     app.list_area = Rect::default();
+    app.typeface_area = Rect::default();
     let scrolled = app.scrolled;
     match app.tab {
         Tab::Fonts => {
@@ -33,6 +34,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             let items = collection_items(app);
             app.list_area = left;
             render_list(frame, left, items, &mut app.collection_list, scrolled);
+            app.typeface_area = right;
             let lines = typeface_lines(app, right.height as usize);
             frame.render_widget(Paragraph::new(lines).block(Block::new().borders(Borders::LEFT)), right);
         }
@@ -154,32 +156,48 @@ fn confirmation(question: String, owner: &Owner, preposition: &str) -> Line<'sta
 fn help_line(app: &App) -> Line<'static> {
     // With a kept search filter, esc clears the filter first.
     let esc = match () {
-        _ if !app.search.is_empty() => "esc clear",
-        _ if app.editing.is_some() => "esc done",
-        _ if app.replacing.is_some() => "esc cancel",
-        _ => "esc quit",
+        _ if !app.search.is_empty() => ("Esc", "Clear"),
+        _ if app.editing.is_some() => ("Esc", "Done"),
+        _ if app.replacing.is_some() => ("Esc", "Cancel"),
+        _ => ("Esc", "Quit"),
     };
-    let text = match &app.input {
-        Some(Input { prompt: Prompt::ConfirmDelete { .. }, .. }) => " y delete  any other key cancels".to_string(),
-        Some(Input { prompt: Prompt::ConfirmReplace { .. }, .. }) => " y replace  any other key cancels".to_string(),
-        Some(Input { prompt: Prompt::ConfirmRemove { .. }, .. }) => " y remove  any other key cancels".to_string(),
-        Some(_) => " enter save  esc cancel".to_string(),
-        None if app.searching => " type to search  enter done  esc clear".to_string(),
-        None if app.editing.is_some() => format!(" enter add/remove  ←→ close/open  a-z jump  / search  {esc}"),
-        None if app.replacing.is_some() => format!(" enter choose  ←→ close/open  a-z jump  / search  {esc}"),
+    let keys: Vec<(&str, &str)> = match &app.input {
+        Some(Input { prompt: Prompt::ConfirmDelete { .. }, .. }) => vec![("Y", "Delete"), ("Other keys", "Cancel")],
+        Some(Input { prompt: Prompt::ConfirmReplace { .. }, .. }) => vec![("Y", "Replace"), ("Other keys", "Cancel")],
+        Some(Input { prompt: Prompt::ConfirmRemove { .. }, .. }) => vec![("Y", "Remove"), ("Other keys", "Cancel")],
+        Some(_) => vec![("Enter", "Save"), ("Esc", "Cancel")],
+        None if app.searching => vec![("Type", "Search"), ("Enter", "Done"), ("Esc", "Clear")],
+        None if app.editing.is_some() => {
+            vec![("Enter", "Add/remove"), ("←→", "Close/open"), ("A-Z", "Jump"), ("/", "Search"), esc]
+        }
+        None if app.replacing.is_some() => {
+            vec![("Enter", "Choose"), ("←→", "Close/open"), ("A-Z", "Jump"), ("/", "Search"), esc]
+        }
         None if app.tab == Tab::Fonts => {
-            format!(" enter toggle  ←→ close/open  a-z jump  / search  tab collections  {esc}")
+            vec![
+                ("Enter", "Toggle"),
+                ("←→", "Close/open"),
+                ("A-Z", "Jump"),
+                ("/", "Search"),
+                ("Tab", "Collections"),
+                esc,
+            ]
         }
-        None if app.moving => " ↑↓ move  enter done".to_string(),
+        None if app.moving => vec![("↑↓", "Move"), ("Enter", "Done")],
         None if app.tab == Tab::Settings && app.tabs().contains(&Tab::Missing) => {
-            format!(" enter pick up and move  ↑↓ select  tab missing  {esc}")
+            vec![("Enter", "Pick up and move"), ("↑↓", "Select"), ("Tab", "Missing"), esc]
         }
-        None if app.tab == Tab::Settings => format!(" enter pick up and move  ↑↓ select  tab fonts  {esc}"),
-        None if app.tab == Tab::Missing && app.missing.is_empty() => format!(" tab fonts  {esc}"),
-        None if app.tab == Tab::Missing => format!(" enter replace  d remove  ↑↓ select  tab fonts  {esc}"),
-        None => format!(" enter enable/disable  e edit  n new  r rename  d delete  {esc}"),
+        None if app.tab == Tab::Settings => {
+            vec![("Enter", "Pick up and move"), ("↑↓", "Select"), ("Tab", "Fonts"), esc]
+        }
+        None if app.tab == Tab::Missing && app.missing.is_empty() => vec![("Tab", "Fonts"), esc],
+        None if app.tab == Tab::Missing => {
+            vec![("Enter", "Replace"), ("D", "Remove"), ("↑↓", "Select"), ("Tab", "Fonts"), esc]
+        }
+        None => vec![("Enter", "Enable/disable"), ("E", "Edit"), ("N", "New"), ("R", "Rename"), ("D", "Delete"), esc],
     };
-    Line::from(text).dim()
+    let text = keys.iter().map(|(key, action)| format!("{key} : {action}")).collect::<Vec<_>>().join(" | ");
+    Line::from(format!(" {text}")).dim()
 }
 
 fn list(items: Vec<ListItem<'static>>) -> List<'static> {
@@ -301,9 +319,16 @@ fn plural(count: usize, word: &str) -> String {
     format!("{count} {word}{}", if count == 1 { "" } else { "s" })
 }
 
-/// The typefaces of the selected collection, at most `height` lines.
-fn typeface_lines(app: &App, height: usize) -> Vec<Line<'static>> {
+/// The typefaces of the selected collection, at most `height` lines, from `App::typeface_offset`.
+/// The offset starts at 0 for each newly selected collection and stops when the last row is at
+/// the bottom. If rows are below the view, the last line says how many.
+fn typeface_lines(app: &mut App, height: usize) -> Vec<Line<'static>> {
     let Some(collection) = app.selected_collection() else { return vec![] };
+    let collection = collection.clone();
+    if app.typeface_collection.as_deref() != Some(collection.id.as_str()) {
+        app.typeface_collection = Some(collection.id.clone());
+        app.typeface_offset = 0;
+    }
     let mut lines = vec![Line::from(format!(" {}", collection.name)).bold()];
     let typefaces = typefaces(&app.context.library, &collection.fonts);
     if typefaces.items.is_empty() && typefaces.unreadable == 0 {
@@ -324,10 +349,13 @@ fn typeface_lines(app: &App, height: usize) -> Vec<Line<'static>> {
         rows.push(Line::from(format!(" Unreadable ({})", plural(typefaces.unreadable, "file"))).red());
     }
     let room = height.saturating_sub(1);
+    let offset = app.typeface_offset.min(rows.len().saturating_sub(room));
+    app.typeface_offset = offset;
+    let mut rows = rows.split_off(offset);
     if rows.len() > room {
         let more = rows.len() - room.saturating_sub(1);
         rows.truncate(room.saturating_sub(1));
-        rows.push(Line::from(format!(" … and {more} more")).dim());
+        rows.push(Line::from(format!(" ↓ {more} more")).dim());
     }
     lines.extend(rows);
     lines
@@ -335,9 +363,8 @@ fn typeface_lines(app: &App, height: usize) -> Vec<Line<'static>> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{Fixture, fixture, open, open_with_missing, press, type_text};
+    use super::super::tests::{fixture, open, open_with_all_collection, open_with_missing, press, type_text};
     use super::*;
-    use crate::app::Context;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::{KeyCode, MouseEvent, MouseEventKind};
@@ -402,14 +429,6 @@ mod tests {
         insta::assert_snapshot!(draw(&mut app));
     }
 
-    /// Opens the fixture with an extra collection "All" that includes both foundries.
-    fn open_with_all_collection(f: &Fixture) -> App {
-        let root = Context::load(&f.config).unwrap().library.root;
-        let json = br#"{"id": "c0", "name": "All", "fonts": ["Foundry A/", "Foundry B/"]}"#;
-        crate::testing::write_file(&root, ".sorts/collections/all.json", json);
-        open(f)
-    }
-
     #[test]
     fn collections_tab_shows_the_typefaces_of_the_selected_collection() {
         let f = fixture();
@@ -432,6 +451,22 @@ mod tests {
         let f = fixture();
         let mut app = open_with_all_collection(&f);
         press(&mut app, KeyCode::Tab);
+        insta::assert_snapshot!(draw_sized(&mut app, 80, 7));
+    }
+
+    #[test]
+    fn collections_tab_with_the_typefaces_scrolled() {
+        let f = fixture();
+        let mut app = open_with_all_collection(&f);
+        press(&mut app, KeyCode::Tab);
+        draw_sized(&mut app, 80, 7);
+        let wheel = MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 70,
+            row: 2,
+            modifiers: ratatui::crossterm::event::KeyModifiers::NONE,
+        };
+        app.handle_mouse(wheel);
         insta::assert_snapshot!(draw_sized(&mut app, 80, 7));
     }
 

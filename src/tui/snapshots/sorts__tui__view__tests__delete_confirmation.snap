@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                │                                               "
 "                                │                                               "
 " Delete collection "Brand" for the whole team? y/n                              "
-" y delete  any other key cancels                                                "
+" Y : Delete | Other keys : Cancel                                               "

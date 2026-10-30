@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                                                                "
 "                                                                                "
 " Editing Brand. Enter adds or removes fonts. Esc when done.                     "
-" enter add/remove  ←→ close/open  a-z jump  / search  esc done                  "
+" Enter : Add/remove | ←→ : Close/open | A-Z : Jump | / : Search | Esc : Done    "

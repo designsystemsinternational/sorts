@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                                                                "
 "                                                                                "
 "                                                                                "
-" type to search  enter done  esc clear                                          "
+" Type : Search | Enter : Done | Esc : Clear                                     "

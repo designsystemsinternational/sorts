@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                                                                "
 "                                                                                "
 " Moved ttf to position 1. Registered 0, unregistered 0.                         "
-" ↑↓ move  enter done                                                            "
+" ↑↓ : Move | Enter : Done                                                       "

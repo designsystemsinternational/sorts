@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                │                                               "
 "                                │                                               "
 " Enabled collection Brand. Registered 1, unregistered 0.                        "
-" enter enable/disable  e edit  n new  r rename  d delete  esc quit              "
+" Enter : Enable/disable | E : Edit | N : New | R : Rename | D : Delete | Esc : Q"

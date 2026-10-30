@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                                                                "
 "                                                                                "
 "                                                                                "
-" enter toggle  ←→ close/open  a-z jump  / search  tab collections  esc clear    "
+" Enter : Toggle | ←→ : Close/open | A-Z : Jump | / : Search | Tab : Collections "

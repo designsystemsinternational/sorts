@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                                                                "
 "                                                                                "
 " Replace "Gone.otf" with "Foundry A/" in "Brand" for the whole team? y/n        "
-" y replace  any other key cancels                                               "
+" Y : Replace | Other keys : Cancel                                              "

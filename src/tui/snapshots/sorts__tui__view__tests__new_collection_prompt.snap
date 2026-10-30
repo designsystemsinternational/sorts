@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                │                                               "
 "                                │                                               "
 " New collection name: Studio_                                                   "
-" enter save  esc cancel                                                         "
+" Enter : Save | Esc : Cancel                                                    "

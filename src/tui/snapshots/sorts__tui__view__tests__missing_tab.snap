@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                                                                "
 "                                                                                "
 " 2 entries point to fonts that do not exist. See the Missing tab.               "
-" enter replace  d remove  ↑↓ select  tab fonts  esc quit                        "
+" Enter : Replace | D : Remove | ↑↓ : Select | Tab : Fonts | Esc : Quit          "
