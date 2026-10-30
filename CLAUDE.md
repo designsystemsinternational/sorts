@@ -15,6 +15,7 @@ The special feature: a team shares one `Fonts` folder (on Google Drive), and eac
 - Settings tab (after Collections) is done: change `formatOrder` in the TUI.
 - `sorts fix` + Missing tab is done: the user replaces or removes entries that point to moved fonts.
 - Scan progress is done: online-only files are downloaded by the scan, and stderr shows the progress (see "Online-only files").
+- `--debug` is done (see "Debug log"). It was added because the scan hung for a teammate with no visible progress.
 - Roadmap step 5 is prepared: public repo + public tap `designsystemsinternational/homebrew-tap`, formula builds from source. See `docs/RELEASING.md`. The user does all Git work (repos, tags, pushes) themselves.
 - The user tries the CLI from source (`cargo run --release --` / `cargo install --path .`, see README "Run from source") and gives feedback.
 - The build needs only Rust and the Xcode Command Line Tools, not Xcode.
@@ -36,7 +37,8 @@ src/
   main.rs        CLI parsing (clap) and output only. Picks the activator.
   app.rs         Commands: init, sync, status. `Context::load` = settings + scan + collections.
   scan.rs        Walks the Fonts root, reads names with ttf-parser (parallel with rayon). Detects online-only files.
-  progress.rs    The scan progress line on stderr (scanning count, downloads, offline tip).
+  progress.rs    The scan progress line on stderr (scanning count + folder, reads, downloads, elapsed time, offline tip).
+  debug.rs       `--debug`: DebugLog (one line per scan event, WAIT list of steps that wait) and DebugActivator.
   entry.rs       Folder/font entry matching ("A/" matches everything under A/).
   active.rs      Active set calculation + formatOrder selection.
   collections.rs Collection files: load, slug, create, rename, save, delete.
@@ -303,11 +305,23 @@ Measured on a shared Google Drive folder with several thousand desktop fonts (Oc
 
 - A file sync app (Google Drive, Dropbox, ...) can keep files as dataless placeholders (`SF_DATALESS` in `st_flags`). Reading the metadata does not download the file. Reading the contents downloads it.
 - The user wants the automatic download. sorts does not block it. It shows it instead.
-- `scan::scan_with` checks each font file with `ScanOptions::is_dataless` (injected, so tests can fake it) and reports `ScanEvent`s: `Found(n)` during the walk, `Downloading { files, bytes }` once after the walk, `Downloaded { bytes }` per online-only file. `Library::downloaded` counts them.
-- `progress::Progress` draws the events on stderr. In a terminal: one line updated in place (at most every 100 ms), cleared at the end. Without a terminal: only "Downloading N files (X MB)..." and the end line. After downloads it shows "Downloaded N files (X MB)." and a tip to make the folder available offline.
+- `scan::scan_with` checks each font file with `ScanOptions::is_dataless` (injected, so tests can fake it) and reports `ScanEvent`s: `Folder { id, flags }` for each folder of the walk (before its listing), `Found { count, id, size, flags, online_only }` per font file, then `Downloading { files, bytes }` (only with online-only files) and `Reading { files }` after the walk, and `ReadStart` / `Read { downloaded, error }` per file (from several threads). `Library::downloaded` counts the online-only files.
+- Folders can also be online only. The first listing of a folder that was never opened on the machine can wait for the network, so a slow walk is possible before any download.
+- `progress::Progress` draws the events on stderr. In a terminal: one line updated in place, cut to the terminal width (a wrapped line cannot be updated in place). Events redraw at most every 100 ms. A timer thread in `main.rs` calls `Progress::tick` every 250 ms, so the elapsed time moves and the line shows the latest count also when no events arrive. Lines: `Scanning: N font files found, m:ss, in <folder>`, then `Reading: n of N font files, m:ss` or `Downloading: n of N files (X MB of Y MB), m:ss`. The line is cleared at the end. Without a terminal: only "Downloading N files (X MB)..." and the end line. After downloads it shows "Downloaded N files (X MB)." and a tip to make the folder available offline.
+- Tests pass the time with `Progress::event_at` / `tick_at`.
 - Never name a specific sync app (e.g. "Google Drive") in the output. The user does not know which app a teammate uses.
 - All commands that scan show the progress: `init` (it scans once and prints "Font files: N"), `sync`, `status`, `fix`, and `sorts`.
 - With no font files, `sorts` and `sorts fix` fail with "No font files found in <root>." `init` prints the same text but keeps the root.
+
+## Debug log
+
+`--debug` is a global flag (`sorts --debug sync` and `sorts init --debug` both work).
+
+- The progress line is off. `debug::DebugLog` writes to stderr: version, macOS version, settings folder, arguments, Fonts folder, its `st_flags`, then one line per `ScanEvent`, each with the time since start and the thread.
+- Reads and activator calls are steps with a start and an end (`begin` / `end`, with the duration). The timer thread calls `DebugLog::waits` every 5 s (`WAIT_AFTER`): it lists steps that run longer than 5 s, and the walk if it had no event for 5 s (`WAIT ... walk, no new event since: <last event>`).
+- `sync` wraps the activator in `DebugActivator`, so each register/unregister is a step.
+- The interactive list does not log (the log stops before the TUI opens).
+- Tests pass the time and the thread name with the `*_at` methods.
 
 ## Roadmap
 

@@ -233,3 +233,53 @@ fn commands_show_the_downloads_of_online_only_files() {
     }
     env.cmd(&["sync"]).assert().success().stderr(predicate::str::contains("Downloading").not());
 }
+
+#[test]
+fn debug_logs_each_step_of_the_scan() {
+    let env = env();
+    write_font(&env.root, "A/Local.otf", "Local-Regular");
+    write_font(&env.root, "B/Cloud.otf", "Cloud-Regular");
+    let output = env
+        .cmd(&["init", env.root.to_str().unwrap(), "--debug"])
+        .env("SORTS_FAKE_DATALESS", "Cloud")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Font files: 2"))
+        .get_output()
+        .stderr
+        .clone();
+    let log = String::from_utf8(output).unwrap();
+    for text in [
+        &format!("sorts {}", env!("CARGO_PKG_VERSION")),
+        "macOS ",
+        "] [main] command: init",
+        "end stat of the Fonts folder",
+        "folder (root) flags=",
+        "folder A/ flags=",
+        "found #2 B/Cloud.otf size=",
+        "online-only",
+        "walk done. 2 font files to read",
+        "start read A/Local.otf",
+        "end read B/Cloud.otf",
+        "downloaded",
+        "Downloaded 1 file (",
+        "done",
+    ] {
+        assert!(log.contains(text), "{text:?} is not in the log:\n{log}");
+    }
+    assert!(!log.contains("\x1b[2K"), "the progress line is off in debug mode:\n{log}");
+}
+
+#[test]
+fn debug_logs_each_registration_of_sync() {
+    let env = env();
+    write_font(&env.root, "A/Local.otf", "Local-Regular");
+    env.cmd(&["init", env.root.to_str().unwrap()]).assert().success();
+    env.enable(&["A/"]);
+    env.cmd(&["--debug", "sync"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(format!("start register {}", env.root.join("A/Local.otf").display())))
+        .stderr(predicate::str::contains("end register").and(predicate::str::contains(" ok")));
+    env.cmd(&["sync"]).assert().success().stderr(predicate::str::contains("register").not());
+}

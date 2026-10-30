@@ -141,6 +141,18 @@ The change applies immediately. sorts saves the order as `formatOrder` in
 `~/Library/Application Support/sorts/config.json`. The default order is `otf`,
 `ttf`, `ttc`, `otc`.
 
+## Troubleshooting
+
+If a command seems to hang, run it again with `--debug`:
+
+```sh
+sorts init --debug 2> sorts-debug.log
+```
+
+The log has one line for each folder, font file, and read, with the time and the
+thread. Every 5 seconds, it lists the steps that wait (`WAIT`). A folder or file
+with `dataless` in its flags is online only. Send the log to the developers.
+
 ## Develop
 
 ```sh

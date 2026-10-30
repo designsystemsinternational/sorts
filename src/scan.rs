@@ -90,7 +90,7 @@ pub const FAKE_DATALESS_ENV: &str = "SORTS_FAKE_DATALESS";
 /// A read downloads the file (for example from Google Drive or Dropbox) before it returns.
 const SF_DATALESS: u32 = 0x4000_0000;
 
-fn has_dataless_flag(flags: u32) -> bool {
+pub fn has_dataless_flag(flags: u32) -> bool {
     flags & SF_DATALESS != 0
 }
 
@@ -100,15 +100,21 @@ pub fn is_dataless(_id: &str, metadata: &fs::Metadata) -> bool {
     has_dataless_flag(metadata.st_flags())
 }
 
-/// What the scan does, for a progress display.
+/// What the scan does, for a progress display and the debug log.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ScanEvent {
-    /// The walk found this many font files so far.
-    Found(usize),
+    /// The walk entered this folder and lists it next. The ID ends with `/` (empty for the root).
+    Folder { id: String, flags: u32 },
+    /// The walk found a font file. `count` is the number of font files found so far.
+    Found { count: usize, id: String, size: u64, flags: u32, online_only: bool },
     /// The walk is complete, and this many online-only files will now be downloaded.
     Downloading { files: usize, bytes: u64 },
-    /// One online-only file was downloaded and read. Sent from several threads.
-    Downloaded { bytes: u64 },
+    /// The walk is complete, and the scan now reads this many font files.
+    Reading { files: usize },
+    /// The read of one file starts. Sent from several threads.
+    ReadStart { id: String },
+    /// The read of one file ended. `downloaded` is the size if the file was online only. Sent from several threads.
+    Read { id: String, downloaded: Option<u64>, error: Option<String> },
 }
 
 pub struct ScanOptions<'a> {
@@ -131,17 +137,28 @@ pub fn scan(root: &Path) -> std::io::Result<Library> {
 
 /// Like [`scan`], with a progress callback. Online-only files are downloaded by the read.
 pub fn scan_with(root: &Path, options: &ScanOptions) -> std::io::Result<Library> {
+    use std::os::macos::fs::MetadataExt;
     // (id, size in bytes if the file is online only)
     let mut files: Vec<(String, Option<u64>)> = Vec::new();
     for entry in WalkDir::new(root).into_iter().filter_entry(|e| !is_hidden(e) && !is_rightfont_library(e)) {
         let entry = entry.map_err(std::io::Error::from)?;
-        if entry.file_type().is_file() && has_font_extension(entry.path()) {
-            let rel = entry.path().strip_prefix(root).expect("walkdir yields paths under root");
-            let id = rel.to_string_lossy().into_owned();
+        let rel = entry.path().strip_prefix(root).expect("walkdir yields paths under root");
+        let id = rel.to_string_lossy().into_owned();
+        if entry.file_type().is_dir() {
+            let flags = entry.metadata().map_err(std::io::Error::from)?.st_flags();
+            let id = if id.is_empty() { id } else { format!("{id}/") };
+            (options.progress)(ScanEvent::Folder { id, flags });
+        } else if entry.file_type().is_file() && has_font_extension(entry.path()) {
             let metadata = entry.metadata().map_err(std::io::Error::from)?;
-            let online_only = (options.is_dataless)(&id, &metadata).then_some(metadata.len());
-            files.push((id, online_only));
-            (options.progress)(ScanEvent::Found(files.len()));
+            let online_only = (options.is_dataless)(&id, &metadata);
+            files.push((id.clone(), online_only.then_some(metadata.len())));
+            (options.progress)(ScanEvent::Found {
+                count: files.len(),
+                id,
+                size: metadata.len(),
+                flags: metadata.st_flags(),
+                online_only,
+            });
         }
     }
     files.sort();
@@ -150,15 +167,19 @@ pub fn scan_with(root: &Path, options: &ScanOptions) -> std::io::Result<Library>
     if !downloads.is_empty() {
         (options.progress)(ScanEvent::Downloading { files: downloads.len(), bytes: downloads.iter().sum() });
     }
+    (options.progress)(ScanEvent::Reading { files: files.len() });
 
     let fonts = files
         .into_par_iter()
         .map(|(id, online_only)| {
-            let result = fs::read(root.join(&id)).map_err(|e| e.to_string());
-            if let Some(bytes) = online_only {
-                (options.progress)(ScanEvent::Downloaded { bytes });
-            }
-            match result.and_then(|d| read_faces(&d)) {
+            (options.progress)(ScanEvent::ReadStart { id: id.clone() });
+            let result = fs::read(root.join(&id)).map_err(|e| e.to_string()).and_then(|d| read_faces(&d));
+            (options.progress)(ScanEvent::Read {
+                id: id.clone(),
+                downloaded: online_only,
+                error: result.clone().err(),
+            });
+            match result {
                 Ok(faces) => FontFile { id, faces, error: None },
                 Err(error) => FontFile { id, faces: vec![], error: Some(error) },
             }
@@ -259,6 +280,40 @@ mod tests {
         (library, events.into_inner().unwrap())
     }
 
+    /// The events of the walk, in order: folders and found files.
+    fn walk_events(events: &[ScanEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                ScanEvent::Folder { id, .. } => Some(format!("folder {id}")),
+                ScanEvent::Found { count, id, online_only, .. } => Some(format!("found {count} {id} {online_only}")),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn reports_the_folders_and_the_found_files_of_the_walk() {
+        let root = tempfile::tempdir().unwrap();
+        write_font(root.path(), "A/Local.otf", "Local-Regular");
+        write_font(root.path(), "B/Cloud.otf", "Cloud-Regular");
+        write_file(root.path(), "B/Readme.txt", b"text");
+
+        let (_, events) = scan_events(root.path(), "Cloud");
+
+        let walk = walk_events(&events);
+        assert_eq!(
+            walk,
+            ["folder ", "folder A/", "found 1 A/Local.otf false", "folder B/", "found 2 B/Cloud.otf true"]
+        );
+        let size = fs::metadata(root.path().join("B/Cloud.otf")).unwrap().len();
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ScanEvent::Found { id, size: s, .. } if id == "B/Cloud.otf" && *s == size))
+        );
+    }
+
     #[test]
     fn reports_the_found_files_and_the_downloads() {
         let root = tempfile::tempdir().unwrap();
@@ -270,16 +325,43 @@ mod tests {
 
         let (library, events) = scan_events(root.path(), "Cloud");
 
-        assert_eq!(events[..3], [ScanEvent::Found(1), ScanEvent::Found(2), ScanEvent::Found(3)]);
-        assert_eq!(events[3], ScanEvent::Downloading { files: 2, bytes: one + two });
-        // The files are read in parallel, so the downloads can end in any order.
-        let mut downloaded = events[4..].to_vec();
+        let after_walk = events.iter().position(|e| matches!(e, ScanEvent::Downloading { .. })).unwrap();
+        assert_eq!(walk_events(&events[..after_walk]).len(), 6);
+        assert_eq!(events[after_walk], ScanEvent::Downloading { files: 2, bytes: one + two });
+        assert_eq!(events[after_walk + 1], ScanEvent::Reading { files: 3 });
+        // The files are read in parallel, so the reads can end in any order.
+        let mut downloaded: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ScanEvent::Read { downloaded: Some(bytes), .. } => Some(*bytes),
+                _ => None,
+            })
+            .collect();
         downloaded.sort();
-        let mut expected = vec![ScanEvent::Downloaded { bytes: one }, ScanEvent::Downloaded { bytes: two }];
+        let mut expected = vec![one, two];
         expected.sort();
         assert_eq!(downloaded, expected);
         assert_eq!(library.downloaded, 2);
         assert_eq!(library.get("B/Cloud-One.otf").unwrap().faces[0].postscript, "Cloud-One");
+    }
+
+    #[test]
+    fn reports_the_start_and_the_end_of_each_read() {
+        let root = tempfile::tempdir().unwrap();
+        write_font(root.path(), "A/Local.otf", "Local-Regular");
+        write_file(root.path(), "A/Broken.ttf", b"not a font");
+
+        let (_, events) = scan_events(root.path(), "Cloud");
+
+        assert!(!events.iter().any(|e| matches!(e, ScanEvent::Downloading { .. })));
+        let reading = events.iter().position(|e| *e == ScanEvent::Reading { files: 2 }).unwrap();
+        let mut reads = events[reading + 1..].to_vec();
+        reads.sort();
+        assert_eq!(reads.len(), 4);
+        assert_eq!(reads[0], ScanEvent::ReadStart { id: "A/Broken.ttf".into() });
+        assert_eq!(reads[1], ScanEvent::ReadStart { id: "A/Local.otf".into() });
+        assert!(matches!(&reads[2], ScanEvent::Read { id, downloaded: None, error: Some(_) } if id == "A/Broken.ttf"));
+        assert_eq!(reads[3], ScanEvent::Read { id: "A/Local.otf".into(), downloaded: None, error: None });
     }
 
     #[test]
@@ -289,7 +371,7 @@ mod tests {
 
         let (library, events) = scan_events(root.path(), "Cloud");
 
-        assert_eq!(events, [ScanEvent::Found(1)]);
+        assert!(!events.iter().any(|e| matches!(e, ScanEvent::Downloading { .. })));
         assert_eq!(library.downloaded, 0);
     }
 
