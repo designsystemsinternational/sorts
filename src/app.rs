@@ -2,7 +2,7 @@
 
 use crate::activator::FontActivator;
 use crate::collections::{self, Collections};
-use crate::scan::{self, Library};
+use crate::scan::{self, Library, ScanOptions};
 use crate::settings::{ConfigDir, Settings, State};
 use crate::sync::{self, SyncReport};
 use crate::{active, entry};
@@ -23,11 +23,23 @@ pub struct Context {
 impl Context {
     /// Loads the settings and scans the Fonts root. Fails if `init` was not run.
     pub fn load(config: &ConfigDir) -> anyhow::Result<Self> {
+        Self::load_with(config, &ScanOptions::default())
+    }
+
+    /// Like [`Context::load`], with options for the scan (e.g. a progress display).
+    pub fn load_with(config: &ConfigDir, options: &ScanOptions) -> anyhow::Result<Self> {
         let settings = config.load_settings()?;
         let root = settings.root.clone().context("No Fonts folder is set. Run `sorts init` first.")?;
-        let library = scan::scan(&root).with_context(|| format!("Cannot scan the Fonts folder {}", root.display()))?;
+        let library = scan::scan_with(&root, options)
+            .with_context(|| format!("Cannot scan the Fonts folder {}", root.display()))?;
         let collections = collections::load(&root);
         Ok(Self { state: config.load_state()?, settings, library, collections })
+    }
+
+    /// Fails if the Fonts folder has no font files, because the interactive list would be empty.
+    pub fn ensure_fonts(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.library.fonts.is_empty(), "{}", describe_fonts(&self.library));
+        Ok(())
     }
 
     /// Entries in the personal settings and in the collections that match no font, because
@@ -82,6 +94,14 @@ pub fn init(config: &ConfigDir, root: &Path) -> anyhow::Result<PathBuf> {
     Ok(root)
 }
 
+/// "Font files: N", or a message that the Fonts folder has no font files.
+pub fn describe_fonts(library: &Library) -> String {
+    match library.fonts.len() {
+        0 => format!("No font files found in {}.", library.root.display()),
+        count => format!("Font files: {count}"),
+    }
+}
+
 /// Asks a yes/no question on `output` and reads one line from `input`.
 /// Only `y` or `yes` (any case) is yes. An empty line or the end of the input is no.
 pub fn confirm(question: &str, input: &mut impl BufRead, output: &mut impl Write) -> std::io::Result<bool> {
@@ -92,8 +112,8 @@ pub fn confirm(question: &str, input: &mut impl BufRead, output: &mut impl Write
     Ok(matches!(answer.trim().to_lowercase().as_str(), "y" | "yes"))
 }
 
-pub fn sync(config: &ConfigDir, activator: &mut dyn FontActivator) -> anyhow::Result<SyncReport> {
-    let mut context = Context::load(config)?;
+pub fn sync(config: &ConfigDir, scan: &ScanOptions, activator: &mut dyn FontActivator) -> anyhow::Result<SyncReport> {
+    let mut context = Context::load_with(config, scan)?;
     let report = sync::apply(&context.desired_paths(), &mut context.state, activator);
     config.save_state(&context.state)?;
     Ok(report)
@@ -118,8 +138,8 @@ pub struct Status {
     pub collection_problems: Vec<String>,
 }
 
-pub fn status(config: &ConfigDir) -> anyhow::Result<Status> {
-    let context = Context::load(config)?;
+pub fn status(config: &ConfigDir, scan: &ScanOptions) -> anyhow::Result<Status> {
+    let context = Context::load_with(config, scan)?;
     let Context { settings, state, library, collections } = &context;
     let desired = context.desired_paths();
     let (to_register, to_unregister) = sync::plan(&desired, state);
@@ -284,7 +304,7 @@ mod tests {
         update_settings(&f.config, |s| s.enabled = vec!["A/".into()]);
         let mut activator = FakeActivator::default();
 
-        let report = sync(&f.config, &mut activator).unwrap();
+        let report = sync(&f.config, &ScanOptions::default(), &mut activator).unwrap();
 
         assert_eq!(report.registered, [f.root.join("A/One.otf")]);
         assert_eq!(activator.registered, BTreeSet::from([f.root.join("A/One.otf")]));
@@ -298,10 +318,10 @@ mod tests {
         init(&f.config, &f.root).unwrap();
         update_settings(&f.config, |s| s.enabled = vec!["A/".into()]);
         let mut activator = FakeActivator::default();
-        sync(&f.config, &mut activator).unwrap();
+        sync(&f.config, &ScanOptions::default(), &mut activator).unwrap();
 
         write_font(&f.root, "A/New/Two.otf", "A-Two");
-        let report = sync(&f.config, &mut activator).unwrap();
+        let report = sync(&f.config, &ScanOptions::default(), &mut activator).unwrap();
 
         assert_eq!(report.registered, [f.root.join("A/New/Two.otf")]);
         assert!(report.unregistered.is_empty());
@@ -315,11 +335,11 @@ mod tests {
         init(&f.config, &f.root).unwrap();
         update_settings(&f.config, |s| s.enabled_collections = vec!["c1".into()]);
         let mut activator = FakeActivator::default();
-        sync(&f.config, &mut activator).unwrap();
+        sync(&f.config, &ScanOptions::default(), &mut activator).unwrap();
         assert_eq!(activator.registered.len(), 1);
 
         update_settings(&f.config, |s| s.enabled_collections.clear());
-        let report = sync(&f.config, &mut activator).unwrap();
+        let report = sync(&f.config, &ScanOptions::default(), &mut activator).unwrap();
 
         assert_eq!(report.unregistered, [f.root.join("A/One.otf")]);
         assert!(activator.registered.is_empty());
@@ -343,7 +363,7 @@ mod tests {
             s.enabled_collections = vec!["c1".into(), "deleted".into()];
         });
 
-        let status = status(&f.config).unwrap();
+        let status = status(&f.config, &ScanOptions::default()).unwrap();
 
         assert_eq!(status.root, f.root);
         assert_eq!(status.fonts, 3);
@@ -358,6 +378,49 @@ mod tests {
         assert_eq!(status.missing_collections, ["deleted"]);
         assert_eq!(status.missing_collection_entries, [("Brand".to_string(), "Gone/".to_string())]);
         assert_eq!(status.collection_problems.len(), 1);
+    }
+
+    #[test]
+    fn ensure_fonts_fails_without_font_files() {
+        let f = fixture();
+        write_file(&f.root, "A/Readme.txt", b"no fonts here");
+        init(&f.config, &f.root).unwrap();
+
+        let error = Context::load(&f.config).unwrap().ensure_fonts().unwrap_err().to_string();
+
+        assert_eq!(error, format!("No font files found in {}.", f.root.display()));
+    }
+
+    #[test]
+    fn ensure_fonts_accepts_a_folder_with_fonts() {
+        let f = fixture();
+        write_font(&f.root, "A/One.otf", "A-One");
+        init(&f.config, &f.root).unwrap();
+        assert!(Context::load(&f.config).unwrap().ensure_fonts().is_ok());
+    }
+
+    #[test]
+    fn describe_fonts_counts_the_files_or_says_there_are_none() {
+        let f = fixture();
+        assert_eq!(
+            describe_fonts(&scan::scan(&f.root).unwrap()),
+            format!("No font files found in {}.", f.root.display())
+        );
+        write_font(&f.root, "A/One.otf", "A-One");
+        write_font(&f.root, "A/Two.otf", "A-Two");
+        assert_eq!(describe_fonts(&scan::scan(&f.root).unwrap()), "Font files: 2");
+    }
+
+    #[test]
+    fn load_with_passes_the_scan_options() {
+        let f = fixture();
+        write_font(&f.root, "A/One.otf", "A-One");
+        init(&f.config, &f.root).unwrap();
+        let online_only = |_: &str, _: &std::fs::Metadata| true;
+
+        let context = Context::load_with(&f.config, &ScanOptions { is_dataless: &online_only, ..Default::default() });
+
+        assert_eq!(context.unwrap().library.downloaded, 1);
     }
 
     #[test]

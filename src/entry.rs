@@ -45,6 +45,7 @@ mod tests {
     fn library(ids: &[&str]) -> Library {
         Library {
             root: "/fonts".into(),
+            downloaded: 0,
             fonts: ids.iter().map(|id| FontFile { id: id.to_string(), faces: vec![], error: None }).collect(),
         }
     }

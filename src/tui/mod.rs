@@ -1182,7 +1182,7 @@ mod tests {
         settings.enabled = vec!["Foundry C/".into()];
         f.config.save_settings(&settings).unwrap();
         let mut app = open(f);
-        app::sync(&f.config, app.activator.as_mut()).unwrap();
+        app::sync(&f.config, &Default::default(), app.activator.as_mut()).unwrap();
         app.context.state = f.config.load_state().unwrap();
         press(&mut app, KeyCode::BackTab);
         app

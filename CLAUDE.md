@@ -14,6 +14,7 @@ The special feature: a team shares one `Fonts` folder (on Google Drive), and eac
 - Collection picker (`+` in the Fonts tab) is done.
 - Settings tab (after Collections) is done: change `formatOrder` in the TUI.
 - `sorts fix` + Missing tab is done: the user replaces or removes entries that point to moved fonts.
+- Scan progress is done: online-only files are downloaded by the scan, and stderr shows the progress (see "Online-only files").
 - Roadmap step 5 is prepared: public repo + public tap `designsystemsinternational/homebrew-tap`, formula builds from source. See `docs/RELEASING.md`. The user does all Git work (repos, tags, pushes) themselves.
 - The user tries the CLI from source (`cargo run --release --` / `cargo install --path .`, see README "Run from source") and gives feedback.
 - The build needs only Rust and the Xcode Command Line Tools, not Xcode.
@@ -34,7 +35,8 @@ The special feature: a team shares one `Fonts` folder (on Google Drive), and eac
 src/
   main.rs        CLI parsing (clap) and output only. Picks the activator.
   app.rs         Commands: init, sync, status. `Context::load` = settings + scan + collections.
-  scan.rs        Walks the Fonts root, reads names with ttf-parser (parallel with rayon).
+  scan.rs        Walks the Fonts root, reads names with ttf-parser (parallel with rayon). Detects online-only files.
+  progress.rs    The scan progress line on stderr (scanning count, downloads, offline tip).
   entry.rs       Folder/font entry matching ("A/" matches everything under A/).
   active.rs      Active set calculation + formatOrder selection.
   collections.rs Collection files: load, slug, create, rename, save, delete.
@@ -52,7 +54,7 @@ tests/
   coretext.rs    Real CoreText tests, process scope, #[ignore].
 ```
 
-- Env vars: `SORTS_CONFIG_DIR` overrides the settings folder. `SORTS_FAKE_ACTIVATOR=<file>` makes the binary use the file-based fake activator (end-to-end tests only).
+- Env vars: `SORTS_CONFIG_DIR` overrides the settings folder. `SORTS_FAKE_ACTIVATOR=<file>` makes the binary use the file-based fake activator (end-to-end tests only). `SORTS_FAKE_DATALESS=<text>` makes font IDs that contain the text count as online only (end-to-end tests only).
 - Formatting: `rustfmt.toml` sets `max_width = 120`.
 - Snapshots: after an intended UI change, run `INSTA_UPDATE=always cargo test tui::view`, then read the changed `.snap` files and check them before you keep them.
 - The test fonts from `src/testing.rs` are accepted by both ttf-parser and CoreText, so no licensed fixture fonts are needed.
@@ -214,7 +216,7 @@ Test font: one `.otf` file in a Google Drive Fonts folder.
 ### Commands
 
 ```
-sorts init [path]     # set the Fonts root folder; without a path, asks "Use <cwd> as the Fonts folder? [y/N]" (only y/yes accepts; anything else exits with an error and changes nothing)
+sorts init [path]     # set the Fonts root folder; without a path, asks "Use <cwd> as the Fonts folder? [y/N]" (only y/yes accepts; anything else exits with an error and changes nothing). Then scans and prints "Font files: N".
 sorts                 # open the interactive list (default command)
 sorts sync            # reconcile the active fonts with the settings
 sorts status          # show the root, counts, and settings entries that point to files that do not exist
@@ -295,6 +297,17 @@ Measured on a shared Google Drive folder with several thousand desktop fonts (Oc
 - Many PostScript names appear in more than one file, mostly `.otf` + `.ttf` pairs in the same folder (hence `formatOrder`).
 - Some files cannot be parsed. The CLI must handle unreadable files without failing.
 - Files set to "Available offline" in Google Drive are read without downloads.
+- Files that are not available offline are dataless placeholders. A read downloads them first, so a scan of an online-only folder can take minutes and showed nothing before the progress line was added.
+
+## Online-only files
+
+- A file sync app (Google Drive, Dropbox, ...) can keep files as dataless placeholders (`SF_DATALESS` in `st_flags`). Reading the metadata does not download the file. Reading the contents downloads it.
+- The user wants the automatic download. sorts does not block it. It shows it instead.
+- `scan::scan_with` checks each font file with `ScanOptions::is_dataless` (injected, so tests can fake it) and reports `ScanEvent`s: `Found(n)` during the walk, `Downloading { files, bytes }` once after the walk, `Downloaded { bytes }` per online-only file. `Library::downloaded` counts them.
+- `progress::Progress` draws the events on stderr. In a terminal: one line updated in place (at most every 100 ms), cleared at the end. Without a terminal: only "Downloading N files (X MB)..." and the end line. After downloads it shows "Downloaded N files (X MB)." and a tip to make the folder available offline.
+- Never name a specific sync app (e.g. "Google Drive") in the output. The user does not know which app a teammate uses.
+- All commands that scan show the progress: `init` (it scans once and prints "Font files: N"), `sync`, `status`, `fix`, and `sorts`.
+- With no font files, `sorts` and `sorts fix` fail with "No font files found in <root>." `init` prints the same text but keeps the root.
 
 ## Roadmap
 

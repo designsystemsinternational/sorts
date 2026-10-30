@@ -56,6 +56,11 @@ Or run it from anywhere and give the path:
 sorts init "$HOME/Library/CloudStorage/GoogleDrive-MyUser/Shared drives/MyTeam/Fonts"
 ```
 
+sorts reads the names of all font files in the folder. If your sync app keeps
+some files online only (for example Google Drive or Dropbox), sorts downloads
+them first and shows the progress. This can take a long time the first time. To
+make sorts start fast, make the fonts folder available offline in your sync app.
+
 Then open the interactive list:
 
 ```sh

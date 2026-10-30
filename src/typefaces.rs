@@ -51,7 +51,7 @@ mod tests {
 
     fn library(mut fonts: Vec<FontFile>) -> Library {
         fonts.sort_by(|a, b| a.id.cmp(&b.id));
-        Library { root: "/fonts".into(), fonts }
+        Library { root: "/fonts".into(), fonts, downloaded: 0 }
     }
 
     fn typeface(name: &str, styles: usize) -> Typeface {

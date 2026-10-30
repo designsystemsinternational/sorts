@@ -1,9 +1,11 @@
 use clap::{Parser, Subcommand};
 use sorts::activator::{CoreTextActivator, FAKE_ACTIVATOR_ENV, FileFakeActivator, FontActivator};
+use sorts::progress::Progress;
+use sorts::scan::{self, FAKE_DATALESS_ENV, ScanOptions};
 use sorts::settings::ConfigDir;
 use sorts::{app, tui};
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 /// A font manager for a shared Fonts folder.
@@ -33,6 +35,26 @@ fn activator() -> Box<dyn FontActivator> {
     }
 }
 
+/// Runs `load` with a progress display of the scan of `root` on stderr.
+fn with_progress<T>(root: &Path, load: impl FnOnce(&ScanOptions) -> anyhow::Result<T>) -> anyhow::Result<T> {
+    let progress = Progress::new(root, std::io::stderr().is_terminal(), std::io::stderr());
+    let fake = std::env::var(FAKE_DATALESS_ENV).ok();
+    let is_dataless = |id: &str, metadata: &std::fs::Metadata| match &fake {
+        Some(text) => id.contains(text.as_str()),
+        None => scan::is_dataless(id, metadata),
+    };
+    let report = |event| progress.event(event);
+    let result = load(&ScanOptions { is_dataless: &is_dataless, progress: &report });
+    progress.finish();
+    result
+}
+
+/// Loads the context with a progress display.
+fn load(config: &ConfigDir) -> anyhow::Result<app::Context> {
+    let root = config.load_settings()?.root.unwrap_or_default();
+    with_progress(&root, |options| app::Context::load_with(config, options))
+}
+
 fn fonts(count: usize) -> String {
     format!("{count} {}", if count == 1 { "font" } else { "fonts" })
 }
@@ -56,9 +78,12 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             };
             let root = app::init(&config, &path)?;
             println!("Fonts folder: {}", root.display());
+            let library = with_progress(&root, |options| Ok(scan::scan_with(&root, options)?))?;
+            println!("{}", app::describe_fonts(&library));
         }
         Some(Command::Sync) => {
-            let report = app::sync(&config, activator().as_mut())?;
+            let root = config.load_settings()?.root.unwrap_or_default();
+            let report = with_progress(&root, |options| app::sync(&config, options, activator().as_mut()))?;
             println!(
                 "Registered {}. Unregistered {}.",
                 fonts(report.registered.len()),
@@ -69,16 +94,24 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             }
             anyhow::ensure!(report.errors.is_empty(), "{} fonts failed", report.errors.len());
         }
-        Some(Command::Status) => print!("{}", app::status(&config)?),
+        Some(Command::Status) => {
+            let root = config.load_settings()?.root.unwrap_or_default();
+            print!("{}", with_progress(&root, |options| app::status(&config, options))?);
+        }
         Some(Command::Fix) => {
-            let context = app::Context::load(&config)?;
+            let context = load(&config)?;
+            context.ensure_fonts()?;
             if context.missing_entries().is_empty() {
                 println!("All entries point to fonts. Nothing to fix.");
                 return Ok(());
             }
             interactive(context, config, tui::Tab::Missing)?;
         }
-        None => interactive(app::Context::load(&config)?, config, tui::Tab::Fonts)?,
+        None => {
+            let context = load(&config)?;
+            context.ensure_fonts()?;
+            interactive(context, config, tui::Tab::Fonts)?;
+        }
     }
     Ok(())
 }

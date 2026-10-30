@@ -101,6 +101,7 @@ fn init_with_a_folder_does_not_ask() {
 #[test]
 fn the_interactive_list_needs_a_terminal() {
     let env = env();
+    write_font(&env.root, "A/One.otf", "A-One");
     env.cmd(&["init", env.root.to_str().unwrap()]).assert().success();
     env.cmd(&[])
         .assert()
@@ -183,4 +184,52 @@ fn status_and_fix_show_missing_entries() {
     env.cmd(&["status"]).assert().success().stdout(predicate::str::contains("Run `sorts fix`"));
     // The tests have no terminal, so `fix` cannot open the interactive list.
     env.cmd(&["fix"]).assert().failure().stderr(predicate::str::contains("needs a terminal"));
+}
+
+#[test]
+fn init_counts_the_font_files() {
+    let env = env();
+    write_font(&env.root, "A/One.otf", "A-One");
+    env.cmd(&["init", env.root.to_str().unwrap()]).assert().success().stdout(predicate::str::contains("Font files: 1"));
+}
+
+#[test]
+fn init_says_so_when_the_folder_has_no_font_files() {
+    let env = env();
+    env.cmd(&["init", env.root.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!("No font files found in {}.", env.root.display())));
+    assert_eq!(saved_root(&env), Some(env.root.clone()));
+}
+
+#[test]
+fn the_interactive_list_and_fix_say_so_when_there_are_no_font_files() {
+    let env = env();
+    env.cmd(&["init", env.root.to_str().unwrap()]).assert().success();
+    let message = format!("No font files found in {}.", env.root.display());
+    env.cmd(&[]).assert().failure().stderr(predicate::str::contains(&message));
+    env.cmd(&["fix"]).assert().failure().stderr(predicate::str::contains(&message));
+}
+
+#[test]
+fn commands_show_the_downloads_of_online_only_files() {
+    let env = env();
+    write_font(&env.root, "A/Local.otf", "Local-Regular");
+    write_font(&env.root, "B/Cloud.otf", "Cloud-Regular");
+    env.cmd(&["init", env.root.to_str().unwrap()])
+        .env("SORTS_FAKE_DATALESS", "Cloud")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Downloading 1 file ("))
+        .stderr(predicate::str::contains("Downloaded 1 file ("))
+        .stderr(predicate::str::contains("available offline"));
+    for args in [&["sync"][..], &["status"]] {
+        env.cmd(args)
+            .env("SORTS_FAKE_DATALESS", "Cloud")
+            .assert()
+            .success()
+            .stderr(predicate::str::contains("Downloading 1 file"));
+    }
+    env.cmd(&["sync"]).assert().success().stderr(predicate::str::contains("Downloading").not());
 }

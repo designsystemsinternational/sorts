@@ -3,6 +3,7 @@ pub mod active;
 pub mod app;
 pub mod collections;
 pub mod entry;
+pub mod progress;
 pub mod scan;
 pub mod settings;
 pub mod sync;

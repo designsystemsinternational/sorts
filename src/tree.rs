@@ -219,7 +219,7 @@ mod tests {
             })
             .collect();
         fonts.sort_by(|a, b| a.id.cmp(&b.id));
-        Library { root: "/fonts".into(), fonts }
+        Library { root: "/fonts".into(), fonts, downloaded: 0 }
     }
 
     fn sample() -> Library {
