@@ -1,0 +1,16 @@
+---
+source: src/tui/view.rs
+expression: draw(&mut app)
+---
+" Fonts   Collections   Settings   Missing                                       "
+" Missing fonts                                                                  "
+" These entries point to files or folders that do not exist.                     "
+"                                                                                "
+" All entries point to fonts.                                                    "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" tab fonts  esc quit                                                            "

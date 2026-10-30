@@ -11,6 +11,8 @@ The special feature: a team shares one `Fonts` folder (on Google Drive), and eac
 - Roadmap step 2 is done: `init`, `sync`, `status`, settings, scanner, active set, `formatOrder`, collection loading, CoreText activator.
 - Roadmap step 3 is done: the interactive list (`sorts` with no command), with search and toggles.
 - Roadmap step 4 is done: create, rename, delete, enable/disable, and edit collections in the TUI.
+- Settings tab (after Collections) is done: change `formatOrder` in the TUI.
+- `sorts fix` + Missing tab is done: the user replaces or removes entries that point to moved fonts.
 - Roadmap step 5 is prepared: public repo + public tap `designsystemsinternational/homebrew-tap`, formula builds from source. See `docs/RELEASING.md`. The user does all Git work (repos, tags, pushes) themselves.
 - The user tries the CLI from source (`cargo run --release --` / `cargo install --path .`, see README "Run from source") and gives feedback.
 - The build needs only Rust and the Xcode Command Line Tools, not Xcode.
@@ -215,6 +217,7 @@ sorts init [path]     # set the Fonts root folder; without a path, asks "Use <cw
 sorts                 # open the interactive list (default command)
 sorts sync            # reconcile the active fonts with the settings
 sorts status          # show the root, counts, and settings entries that point to files that do not exist
+sorts fix             # open the interactive list on the Missing tab; without missing entries, says so and exits
 ```
 
 There are **no** `enable` / `disable` commands. Enabling and disabling happens only in the interactive list.
@@ -224,7 +227,7 @@ There are **no** `enable` / `disable` commands. Enabling and disabling happens o
 Built (roadmap step 3). A tree that mirrors the folder structure (see the snapshots in `src/tui/snapshots/`):
 
 ```
- Fonts   Collections    / regular_
+ Fonts   Collections   Settings    / regular_
  ▾ [~] Foundry A  2/3
    ▾ [x] Sans  2/2
        [x] Sans-Bold.otf  Sans Bold
@@ -232,13 +235,14 @@ Built (roadmap step 3). A tree that mirrors the folder structure (see the snapsh
    ▸ [ ] Serif  0/1
  ▸ [c] Foundry B  0/2
  Enabled Foundry A/Sans/. Registered 2, unregistered 0.
- space toggle  ←→ close/open  a-z jump  / search  tab collections  ctrl-c quit
+ enter toggle  ←→ close/open  a-z jump  / search  tab collections  esc quit
 ```
 
 - `[x]` all fonts enabled in the personal settings, `[~]` some, `[c]` none, but some are active through an enabled collection, `[ ]` none. Folders show `enabled/total`. Unreadable files show `unreadable`.
 - Folders first, then files, each sorted case-insensitively.
-- Keys: `↑↓` move (`jk` too, but only in the Collections tab), `→` open, `←` close or go to the parent folder, `space`/`enter` toggle, `/` search, `tab`/`shift-tab` switch tabs, `esc` quits, `ctrl-c` always quits. `q` does not quit. While typing a search: `enter` keeps the filter, `esc` clears it. `esc` with a kept filter clears it first.
-- **Jump** (Fonts tab, also in edit mode): a letter or digit selects the next visible row (after the selected one, wrapping) whose name starts with it, case-insensitive. No match: the selection stays. This is why the Fonts tab has no letter commands (no `q`, no `hjkl`).
+- Keys: `↑↓` move (`jk` too, but only in the Collections tab), `→` open, `←` close or go to the parent folder, `enter` toggle (`space` does nothing), `/` search, `tab`/`shift-tab` switch tabs, `esc` quits, `ctrl-c` always quits. `q` does not quit. While typing a search: `enter` keeps the filter, `esc` clears it. `esc` with a kept filter clears it first.
+- **Mouse** (`App::handle_mouse`, mouse capture in `tui/terminal.rs`): the wheel scrolls the list under the pointer (the left list only in the Collections tab) and does not change the selection. A left click selects the row under the pointer (and puts down a picked-up format). A left click on a tab title (`App::tab_areas`, also stored by the view) switches to that tab: it ends edit mode, search typing (the filter stays), and a picked-up format. A click on the current tab does nothing, so a click on "Fonts" in edit mode keeps edit mode. The view stores the list area of the last draw in `App::list_area`; events outside it are ignored. While a prompt is open, the mouse does nothing. After a scroll (`App::scrolled`, cleared by the next key), the list is drawn without the selection if the selected row is out of view, because ratatui scrolls a list back to its selected row. The next key brings the selection back into view.
+- **Jump** (Fonts tab, also in edit mode), as in macOS lists: a letter or digit starts a jump text and selects the next visible row (after the selected one, wrapping) whose name starts with it, case-insensitive. Each key within 500 ms of the previous one (`JUMP_TIMEOUT`) adds to the text, also a space or punctuation (not `/`), and the search then starts at the selected row, so "se" can keep or move the selection. No match: the selection stays. Any other key or a mouse event ends the text. Tests pass the time with `App::handle_key_at`. This is why the Fonts tab has no letter commands (no `q`, no `hjkl`).
 - **Search**: whitespace-separated terms, all must match (case-insensitive substring). A folder matches on its path; a file matches on its ID, family names, and PostScript names. Matches are shown with their parent folders, and those parents are opened automatically. A folder that matches itself stays closed and shows all its children when opened.
 - **Toggle**: a fully enabled node (`[x]`) is disabled; anything else is enabled. The new `enabled` entries are rebuilt from the set of enabled fonts (`Tree::set_enabled`): a folder whose fonts are all enabled becomes one folder entry (so new fonts in it are included later), and disabling one file in an enabled folder splits that folder entry into entries for the rest. Entries that match no font are kept.
 - **A toggle applies only its own change** (`sync::apply_changes` on the active set before vs. after). Fonts that are enabled but not registered yet (e.g. a teammate added them) still wait for `sorts sync`.
@@ -250,16 +254,36 @@ Built (roadmap step 4). A second tab lists the collections, sorted by file name.
 
 Each row shows "N typefaces". A read-only right column shows the typefaces of the selected collection: "Name (N styles)", sorted case-insensitively. A style is a unique PostScript name, so an `.otf` + `.ttf` pair counts once. Unreadable files show as one "Unreadable (N files)" line at the end. If the list is too long, the last line is "… and N more". An empty collection shows "No fonts. Press e to add some."
 
-- `space`: enable / disable the collection in the personal settings.
+- `enter`: enable / disable the collection in the personal settings. `space` does nothing.
 - `n`: create. A prompt in the message line asks for the name. The file is `<slug>.json` with a new UUID `id` and no fonts.
 - `r`: rename. The prompt starts with the current name. The file moves to the new slug; the `id`, the fonts, and everyone's enabled state stay.
 - `d`: delete. Asks "Delete collection "X" for the whole team? y/n"; only `y` deletes. The ID is also removed from the user's own `enabledCollections`, and its fonts are unregistered.
-- `e` / `enter`: **edit mode**. The Fonts tab opens with "Editing: <name>" in the header. The checkboxes show membership in that collection (no `[c]` marks), and `space` adds or removes the folder or font with the same rules as personal toggles (`Tree::set_enabled` on the collection's `fonts`). Each change is saved to the collection file at once. If the collection is enabled, the change is registered at once. `esc` (after clearing a search) or `tab` ends edit mode and returns to the Collections tab.
+- `e`: **edit mode**. The Fonts tab opens with "Editing: <name>" in the header. The checkboxes show membership in that collection (no `[c]` marks), and `enter` adds or removes the folder or font with the same rules as personal toggles (`Tree::set_enabled` on the collection's `fonts`). Each change is saved to the collection file at once. If the collection is enabled, the change is registered at once. `esc` (after clearing a search) or `tab` ends edit mode and returns to the Collections tab.
 - While a prompt is open, it gets all keys (letters are text). `esc` cancels; `ctrl-c` still quits.
 - Errors (e.g. "A collection file named brand.json already exists.") show in the message line.
 - There is no separate "add to collection" picker in the font tree: edit mode covers it.
 
 Collection changes write to `.sorts/collections/` in the Fonts folder, so they affect the whole team. After each change the CLI reads all collection files again.
+
+### Settings (in the TUI)
+
+A third tab, after Collections (`tab`: Fonts → Collections → Settings → Fonts; `shift-tab` goes back). It shows the format order: all four formats (`Settings::full_format_order`: the formats from `formatOrder` first, then the missing ones in the default order).
+
+- `↑↓`/`jk` select a format. `enter` picks it up (the row shows `⇅`).
+- While a format is picked up, `↑↓`/`jk` move it. Each move saves the full list to `formatOrder` and applies only its own change (`update_settings`, the same as a toggle), so the newly preferred files are registered and the others unregistered.
+- `enter` or `esc` puts the format down. Any other key puts it down and does its usual action.
+- The Fonts folder is not shown here (a temp path would break the snapshots). Change it with `sorts init`.
+
+### Missing entries (in the TUI)
+
+When someone moves or renames fonts, entries in `enabled` and in collections can match no font. There is no automatic matching (the user rejected heuristics as too convoluted). The user repairs each entry by hand.
+
+- `Context::missing_entries` lists them: the personal settings first, then each collection (`Owner::Settings` / `Owner::Collection`).
+- The Missing tab comes after Settings. It is shown only if entries were missing when the app opened, or later; once shown, it stays for the session ("All entries point to fonts." when empty). At start, the message line says how many entries are missing.
+- `↑↓`/`jk` select. `enter` starts **replace mode**: the Fonts tab opens with "Replace: <entry>" in the header, and `enter` on a folder or file asks `Replace "X" with "Y"? y/n` (for a collection: `... in "Name" for the whole team? y/n`). Only `y` replaces; another key closes the question and keeps replace mode. Any target type is allowed (a folder can replace a file).
+- `entry::replace` puts the new entry at the place of the old one and does not add a duplicate. The change goes through `App::change_entries` (the same path as toggles), so the new fonts are registered at once. The old registrations of the moved files leave the state at the next `sync`.
+- `esc` (after clearing a search), `tab`, or a click on a tab title ends replace mode.
+- `d` asks to remove the entry (y/n), with the same team warning for collections.
 
 ## Facts about a real Fonts folder
 

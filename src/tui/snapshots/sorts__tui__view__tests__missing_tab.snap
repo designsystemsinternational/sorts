@@ -1,0 +1,16 @@
+---
+source: src/tui/view.rs
+expression: draw(&mut app)
+---
+" Fonts   Collections   Settings   Missing                                       "
+" Missing fonts                                                                  "
+" These entries point to files or folders that do not exist.                     "
+"                                                                                "
+" Old/Sans/  your settings                                                       "
+" Gone.otf  collection Brand                                                     "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" 2 entries point to fonts that do not exist. See the Missing tab.               "
+" enter replace  d remove  ↑↓ select  tab fonts  esc quit                        "

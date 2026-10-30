@@ -1,0 +1,16 @@
+---
+source: src/tui/view.rs
+expression: draw(&mut app)
+---
+" Fonts   Collections   Settings   Missing   Replace: Old/Sans/                  "
+" ▾ [ ] Foundry A  0/3                                                           "
+"   ▸ [ ] Sans  0/2                                                              "
+"   ▸ [ ] Serif  0/1                                                             "
+" ▸ [~] Foundry B  1/2                                                           "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" Select the new location of Old/Sans/. Enter chooses it. Esc cancels.           "
+" enter choose  ←→ close/open  a-z jump  / search  esc cancel                    "

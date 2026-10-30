@@ -1,0 +1,16 @@
+---
+source: src/tui/view.rs
+expression: draw(&mut app)
+---
+" Fonts   Collections   Settings    / regular                                    "
+" ▾ [ ] Foundry A  0/3                                                           "
+"   ▾ [ ] Sans  0/2                                                              "
+"       [ ] Sans-Regular.otf  Sans Regular                                       "
+"   ▾ [ ] Serif  0/1                                                             "
+"       [ ] Serif-Regular.otf  Serif Regular                                     "
+" ▾ [ ] Foundry B  0/2                                                           "
+"     [ ] Antiqua.otf  Antiqua Regular                                           "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" enter toggle  ←→ close/open  a-z jump  / search  tab collections  esc clear    "

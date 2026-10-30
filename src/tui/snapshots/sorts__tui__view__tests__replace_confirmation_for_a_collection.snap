@@ -1,0 +1,16 @@
+---
+source: src/tui/view.rs
+expression: draw(&mut app)
+---
+" Fonts   Collections   Settings   Missing   Replace: Gone.otf                   "
+" ▸ [ ] Foundry A  0/3                                                           "
+" ▸ [~] Foundry B  1/2                                                           "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" Replace "Gone.otf" with "Foundry A/" in "Brand" for the whole team? y/n        "
+" y replace  any other key cancels                                               "

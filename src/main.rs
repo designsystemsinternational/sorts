@@ -22,6 +22,8 @@ enum Command {
     Sync,
     /// Show the Fonts folder, counts, and problems.
     Status,
+    /// Replace or remove entries that point to fonts that do not exist.
+    Fix,
 }
 
 fn activator() -> Box<dyn FontActivator> {
@@ -68,16 +70,28 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             anyhow::ensure!(report.errors.is_empty(), "{} fonts failed", report.errors.len());
         }
         Some(Command::Status) => print!("{}", app::status(&config)?),
-        None => {
-            anyhow::ensure!(
-                std::io::stdout().is_terminal(),
-                "The interactive list needs a terminal. Use `sorts --help` for the other commands."
-            );
+        Some(Command::Fix) => {
             let context = app::Context::load(&config)?;
-            tui::terminal::run(&mut tui::App::new(context, config, activator()))?;
+            if context.missing_entries().is_empty() {
+                println!("All entries point to fonts. Nothing to fix.");
+                return Ok(());
+            }
+            interactive(context, config, tui::Tab::Missing)?;
         }
+        None => interactive(app::Context::load(&config)?, config, tui::Tab::Fonts)?,
     }
     Ok(())
+}
+
+/// Opens the interactive list on `tab`.
+fn interactive(context: app::Context, config: ConfigDir, tab: tui::Tab) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        std::io::stdout().is_terminal(),
+        "The interactive list needs a terminal. Use `sorts --help` for the other commands."
+    );
+    let mut app = tui::App::new(context, config, activator());
+    app.tab = tab;
+    tui::terminal::run(&mut app)
 }
 
 fn main() -> ExitCode {

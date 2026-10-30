@@ -2,7 +2,7 @@
 source: src/tui/view.rs
 expression: draw(&mut app)
 ---
-" Fonts   Collections    / regular_                                              "
+" Fonts   Collections   Settings    / regular_                                   "
 " ▾ [ ] Foundry A  0/3                                                           "
 "   ▾ [ ] Sans  0/2                                                              "
 "       [ ] Sans-Regular.otf  Sans Regular                                       "

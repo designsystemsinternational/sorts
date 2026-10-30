@@ -24,6 +24,19 @@ pub fn exists(entry: &str, library: &Library) -> bool {
     library.fonts.iter().any(|f| matches(entry, &f.id))
 }
 
+/// The entries with `old` replaced by `new` at the same place. If `new` is already in the
+/// list, `old` is only removed.
+pub fn replace(entries: &[String], old: &str, new: &str) -> Vec<String> {
+    let mut result: Vec<String> = Vec::with_capacity(entries.len());
+    for e in entries {
+        let e = if e == old { new } else { e.as_str() };
+        if !result.iter().any(|r| r == e) {
+            result.push(e.to_string());
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -63,6 +76,18 @@ mod tests {
         assert!(matches_any(&entries, "A/X.otf"));
         assert!(matches_any(&entries, "B/One.otf"));
         assert!(!matches_any(&entries, "B/Two.otf"));
+    }
+
+    #[test]
+    fn replace_puts_the_new_entry_at_the_place_of_the_old_one() {
+        let entries = ["A/".to_string(), "Gone/".into(), "B/One.otf".into()];
+        assert_eq!(replace(&entries, "Gone/", "New/X.otf"), ["A/", "New/X.otf", "B/One.otf"]);
+    }
+
+    #[test]
+    fn replace_does_not_add_an_entry_twice() {
+        let entries = ["Gone/".to_string(), "A/".into()];
+        assert_eq!(replace(&entries, "Gone/", "A/"), ["A/"]);
     }
 
     #[test]

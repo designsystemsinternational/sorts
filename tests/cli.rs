@@ -162,3 +162,25 @@ fn status_shows_the_root_counts_and_problems() {
         .stdout(predicate::str::contains("Gone/"))
         .stdout(predicate::str::contains("sorts sync"));
 }
+
+#[test]
+fn fix_says_so_when_nothing_is_missing() {
+    let env = env();
+    write_font(&env.root, "A/One.otf", "A-One");
+    env.cmd(&["init", env.root.to_str().unwrap()]).assert().success();
+    env.enable(&["A/"]);
+
+    env.cmd(&["fix"]).assert().success().stdout("All entries point to fonts. Nothing to fix.\n");
+}
+
+#[test]
+fn status_and_fix_show_missing_entries() {
+    let env = env();
+    write_font(&env.root, "A/One.otf", "A-One");
+    env.cmd(&["init", env.root.to_str().unwrap()]).assert().success();
+    env.enable(&["Moved/"]);
+
+    env.cmd(&["status"]).assert().success().stdout(predicate::str::contains("Run `sorts fix`"));
+    // The tests have no terminal, so `fix` cannot open the interactive list.
+    env.cmd(&["fix"]).assert().failure().stderr(predicate::str::contains("needs a terminal"));
+}

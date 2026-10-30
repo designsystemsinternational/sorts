@@ -2,7 +2,7 @@
 source: src/tui/view.rs
 expression: draw(&mut app)
 ---
-" Fonts   Collections                                                            "
+" Fonts   Collections   Settings                                                 "
 " [ ] Brand  1 typeface          │ Brand                                         "
 " [ ] Editorial  0 typefaces     │ Antiqua (1 style)                             "
 "                                │                                               "

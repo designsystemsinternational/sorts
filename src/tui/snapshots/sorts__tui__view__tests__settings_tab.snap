@@ -1,0 +1,16 @@
+---
+source: src/tui/view.rs
+expression: draw(&mut app)
+---
+" Fonts   Collections   Settings                                                 "
+" Format order                                                                   "
+" When files have the same PostScript name, sorts activates the first format.    "
+"                                                                                "
+" 1  otf                                                                         "
+" 2  ttf                                                                         "
+" 3  ttc                                                                         "
+" 4  otc                                                                         "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" enter pick up and move  ↑↓ select  tab fonts  esc quit                         "

@@ -1,0 +1,16 @@
+---
+source: src/tui/view.rs
+expression: draw(&mut app)
+---
+" Fonts   Collections   Settings                                                 "
+" Format order                                                                   "
+" When files have the same PostScript name, sorts activates the first format.    "
+"                                                                                "
+" 1  ttf  ⇅                                                                      "
+" 2  otf                                                                         "
+" 3  ttc                                                                         "
+" 4  otc                                                                         "
+"                                                                                "
+"                                                                                "
+" Moved ttf to position 1. Registered 0, unregistered 0.                         "
+" ↑↓ move  enter done                                                            "

@@ -21,14 +21,32 @@ pub struct Settings {
     pub format_order: Vec<String>,
 }
 
+/// The scanned file formats, in the default order.
+pub const FORMATS: [&str; 4] = ["otf", "ttf", "ttc", "otc"];
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
             root: None,
             enabled: vec![],
             enabled_collections: vec![],
-            format_order: ["otf", "ttf", "ttc", "otc"].map(String::from).to_vec(),
+            format_order: FORMATS.map(String::from).to_vec(),
         }
+    }
+}
+
+impl Settings {
+    /// All scanned formats: first the ones in `format_order`, then the missing ones in the
+    /// default order. Unknown formats and repeats are left out.
+    pub fn full_format_order(&self) -> Vec<String> {
+        let listed = self.format_order.iter().filter_map(|f| FORMATS.into_iter().find(|k| f.eq_ignore_ascii_case(k)));
+        let mut order: Vec<String> = vec![];
+        for format in listed.chain(FORMATS) {
+            if !order.iter().any(|f| f == format) {
+                order.push(format.to_string());
+            }
+        }
+        order
     }
 }
 
@@ -125,6 +143,13 @@ mod tests {
     #[test]
     fn default_format_order_prefers_otf() {
         assert_eq!(Settings::default().format_order, ["otf", "ttf", "ttc", "otc"]);
+    }
+
+    #[test]
+    fn full_format_order_adds_the_missing_formats_in_the_default_order() {
+        let settings = Settings { format_order: vec!["TTF".into(), "woff".into(), "ttf".into()], ..Default::default() };
+        assert_eq!(settings.full_format_order(), ["ttf", "otf", "ttc", "otc"]);
+        assert_eq!(Settings::default().full_format_order(), ["otf", "ttf", "ttc", "otc"]);
     }
 
     #[test]

@@ -2,7 +2,7 @@
 source: src/tui/view.rs
 expression: draw(&mut app)
 ---
-" Fonts   Collections                                                            "
+" Fonts   Collections   Settings                                                 "
 " ▸ [ ] Foundry A  0/3                                                           "
 " ▾ [~] Foundry B  1/2                                                           "
 "     [x] Antiqua.otf  Antiqua Regular                                           "
@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                                                                "
 "                                                                                "
 " Enabled Foundry B/Antiqua.otf. Registered 1, unregistered 0.                   "
-" space toggle  ←→ close/open  a-z jump  / search  tab collections  ctrl-c quit  "
+" enter toggle  ←→ close/open  a-z jump  / search  tab collections  esc quit     "

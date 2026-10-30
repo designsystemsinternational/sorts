@@ -30,6 +30,23 @@ impl Context {
         Ok(Self { state: config.load_state()?, settings, library, collections })
     }
 
+    /// Entries in the personal settings and in the collections that match no font, because
+    /// the files or folders were moved, renamed, or deleted.
+    pub fn missing_entries(&self) -> Vec<MissingEntry> {
+        let missing = |owner: Owner, entries: &[String]| -> Vec<MissingEntry> {
+            entries
+                .iter()
+                .filter(|e| !entry::exists(e, &self.library))
+                .map(|e| MissingEntry { owner: owner.clone(), entry: e.clone() })
+                .collect()
+        };
+        let mut result = missing(Owner::Settings, &self.settings.enabled);
+        for c in &self.collections.items {
+            result.extend(missing(Owner::Collection { id: c.id.clone(), name: c.name.clone() }, &c.fonts));
+        }
+        result
+    }
+
     /// Absolute paths of the fonts that should be registered.
     pub fn desired_paths(&self) -> BTreeSet<PathBuf> {
         active::active_fonts(&self.library, &self.settings, &self.collections)
@@ -37,6 +54,22 @@ impl Context {
             .map(|id| self.library.path_of(id))
             .collect()
     }
+}
+
+/// Where an entry is stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Owner {
+    /// `enabled` in the personal settings.
+    Settings,
+    /// The `fonts` of a collection file, shared with the team.
+    Collection { id: String, name: String },
+}
+
+/// An entry that matches no font.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingEntry {
+    pub owner: Owner,
+    pub entry: String,
 }
 
 /// Sets the Fonts root folder. Keeps the other settings. Returns the absolute root.
@@ -150,6 +183,9 @@ impl fmt::Display for Status {
             for problem in problems {
                 writeln!(f, "  {problem}")?;
             }
+        }
+        if !self.missing_entries.is_empty() || !self.missing_collection_entries.is_empty() {
+            writeln!(f, "\nRun `sorts fix` to replace or remove the entries that were not found.")?;
         }
         Ok(())
     }
@@ -322,6 +358,39 @@ mod tests {
         assert_eq!(status.missing_collections, ["deleted"]);
         assert_eq!(status.missing_collection_entries, [("Brand".to_string(), "Gone/".to_string())]);
         assert_eq!(status.collection_problems.len(), 1);
+    }
+
+    #[test]
+    fn missing_entries_lists_the_settings_first_and_then_each_collection() {
+        let f = fixture();
+        write_font(&f.root, "A/One.otf", "A-One");
+        write_file(&f.root, ".sorts/collections/b.json", br#"{"id": "c2", "name": "B", "fonts": ["Gone.otf"]}"#);
+        write_file(&f.root, ".sorts/collections/a.json", br#"{"id": "c1", "name": "A", "fonts": ["A/", "Old/"]}"#);
+        init(&f.config, &f.root).unwrap();
+        update_settings(&f.config, |s| s.enabled = vec!["Moved/".into(), "A/One.otf".into(), "X.otf".into()]);
+
+        let missing = Context::load(&f.config).unwrap().missing_entries();
+
+        let owner = |id: &str, name: &str| Owner::Collection { id: id.into(), name: name.into() };
+        assert_eq!(
+            missing,
+            [
+                MissingEntry { owner: Owner::Settings, entry: "Moved/".into() },
+                MissingEntry { owner: Owner::Settings, entry: "X.otf".into() },
+                MissingEntry { owner: owner("c1", "A"), entry: "Old/".into() },
+                MissingEntry { owner: owner("c2", "B"), entry: "Gone.otf".into() },
+            ]
+        );
+    }
+
+    #[test]
+    fn status_display_tells_the_user_to_fix_missing_entries() {
+        let status = Status { missing_entries: vec!["Gone/".into()], ..Default::default() };
+        assert!(status.to_string().contains("sorts fix"), "{status}");
+        let collection =
+            Status { missing_collection_entries: vec![("B".into(), "Gone/".into())], ..Default::default() };
+        assert!(collection.to_string().contains("sorts fix"), "{collection}");
+        assert!(!Status::default().to_string().contains("sorts fix"));
     }
 
     #[test]

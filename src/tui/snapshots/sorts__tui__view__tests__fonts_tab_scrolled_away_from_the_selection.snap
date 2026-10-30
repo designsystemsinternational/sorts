@@ -1,0 +1,9 @@
+---
+source: src/tui/view.rs
+expression: "draw_sized(&mut app, 80, 5)"
+---
+" Fonts   Collections   Settings                                                 "
+"   ▸ [ ] Serif  0/1                                                             "
+" ▸ [ ] Foundry B  0/2                                                           "
+"                                                                                "
+" enter toggle  ←→ close/open  a-z jump  / search  tab collections  esc quit     "
