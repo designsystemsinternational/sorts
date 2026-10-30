@@ -69,6 +69,15 @@ pub enum Prompt {
     },
 }
 
+/// The list of collections that the selected folder or font can be added to or removed from.
+/// While it is open, it gets all keys.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Picker {
+    /// The font tree node that the picker adds or removes.
+    pub node: usize,
+    pub list: ListState,
+}
+
 /// A question in the message line. While it is open, it gets all keys.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Input {
@@ -89,6 +98,7 @@ pub struct App {
     pub searching: bool,
     pub message: Option<String>,
     pub input: Option<Input>,
+    pub picker: Option<Picker>,
     /// The ID of the collection that the font tree edits. `None`: the tree edits the personal settings.
     pub editing: Option<String>,
     /// The missing entry that the font tree picks a new location for.
@@ -142,6 +152,7 @@ impl App {
             searching: false,
             message: None,
             input: None,
+            picker: None,
             editing: None,
             replacing: None,
             missing: vec![],
@@ -207,6 +218,10 @@ impl App {
             self.handle_input_key(key.code);
             return Action::Continue;
         }
+        if self.picker.is_some() {
+            self.handle_picker_key(key.code);
+            return Action::Continue;
+        }
         if self.searching {
             self.handle_search_key(key.code);
             return Action::Continue;
@@ -242,6 +257,11 @@ impl App {
             (Tab::Fonts, KeyCode::Left) => self.collapse(),
             (Tab::Fonts, KeyCode::Enter) if self.replacing.is_some() => self.ask_replace(),
             (Tab::Fonts, KeyCode::Enter) => self.toggle_font_row(),
+            (Tab::Fonts, KeyCode::Char('+'))
+                if jump.is_none() && self.editing.is_none() && self.replacing.is_none() =>
+            {
+                self.open_picker()
+            }
             (Tab::Fonts, KeyCode::Char(c)) if c.is_alphanumeric() || jump.is_some() => self.jump_to(c, jump, now),
             (Tab::Collections, KeyCode::Enter) => self.toggle_collection_row(),
             (Tab::Collections, KeyCode::Char('e')) => self.start_editing(),
@@ -277,7 +297,7 @@ impl App {
     pub fn handle_mouse(&mut self, mouse: MouseEvent) {
         self.jump = None;
         let position = Position::new(mouse.column, mouse.row);
-        if self.input.is_some() {
+        if self.input.is_some() || self.picker.is_some() {
             return;
         }
         if mouse.kind == MouseEventKind::Down(MouseButton::Left)
@@ -371,6 +391,34 @@ impl App {
         }
     }
 
+    fn handle_picker_key(&mut self, code: KeyCode) {
+        let Some(picker) = self.picker.as_mut() else { return };
+        let len = self.context.collections.items.len();
+        let current = picker.list.selected().unwrap_or(0);
+        match code {
+            KeyCode::Esc => self.picker = None,
+            KeyCode::Down => picker.list.select(Some((current + 1).min(len.saturating_sub(1)))),
+            KeyCode::Up => picker.list.select(Some(current.saturating_sub(1))),
+            KeyCode::Enter => {
+                let node = picker.node;
+                if let Some(collection) = self.context.collections.items.get(current) {
+                    let owner = Owner::Collection { id: collection.id.clone(), name: collection.name.clone() };
+                    self.toggle_node(node, &owner);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn open_picker(&mut self) {
+        let Some(node) = self.selected_node() else { return };
+        if self.context.collections.items.is_empty() {
+            self.message = Some("No collections. Press n in the Collections tab to create one.".into());
+            return;
+        }
+        self.picker = Some(Picker { node, list: ListState::default().with_selected(Some(0)) });
+    }
+
     fn handle_search_key(&mut self, code: KeyCode) {
         match code {
             KeyCode::Enter => self.searching = false,
@@ -410,6 +458,17 @@ impl App {
             Mark::Collection
         } else {
             Mark::Off
+        }
+    }
+
+    /// The mark of a node for the entries of a collection: all, some, or none of its fonts.
+    pub fn collection_mark(&self, collection: &Collection, node: usize) -> Mark {
+        let fonts = &self.context.library.fonts[self.tree.nodes[node].fonts.clone()];
+        let count = fonts.iter().filter(|f| entry::matches_any(&collection.fonts, &f.id)).count();
+        match count {
+            0 => Mark::Off,
+            n if n == fonts.len() => Mark::On,
+            _ => Mark::Partial,
         }
     }
 
@@ -518,27 +577,36 @@ impl App {
 
     fn toggle_font_row(&mut self) {
         let Some(node) = self.selected_node() else { return };
-        let on = self.mark(node) != Mark::On;
+        let owner = match self.edited_collection() {
+            Some(c) => Owner::Collection { id: c.id.clone(), name: c.name.clone() },
+            None => Owner::Settings,
+        };
+        self.toggle_node(node, &owner);
+    }
+
+    /// Disables a node whose fonts are all enabled in the settings or the collection, and
+    /// enables any other node.
+    fn toggle_node(&mut self, node: usize, owner: &Owner) {
         let path = &self.tree.nodes[node].path;
-        let (owner, label, entries) = match self.edited_collection() {
-            Some(c) => (
-                Owner::Collection { id: c.id.clone(), name: c.name.clone() },
-                format!(
+        let (on, label, entries) = match owner {
+            Owner::Collection { id, .. } => {
+                let Some(c) = self.context.collections.get(id) else { return };
+                let on = self.collection_mark(c, node) != Mark::On;
+                let label = format!(
                     "{} {path} {} {}",
                     if on { "Added" } else { "Removed" },
                     if on { "to" } else { "from" },
                     c.name
-                ),
-                &c.fonts,
-            ),
-            None => (
-                Owner::Settings,
-                format!("{} {path}", if on { "Enabled" } else { "Disabled" }),
-                &self.context.settings.enabled,
-            ),
+                );
+                (on, label, &c.fonts)
+            }
+            Owner::Settings => {
+                let on = self.mark(node) != Mark::On;
+                (on, format!("{} {path}", if on { "Enabled" } else { "Disabled" }), &self.context.settings.enabled)
+            }
         };
         let entries = self.tree.set_enabled(&self.context.library, entries, node, on);
-        self.change_entries(&label, &owner, |_| entries);
+        self.change_entries(&label, owner, |_| entries);
     }
 
     /// Changes the entries in the personal settings or in a collection file, then registers
@@ -1773,5 +1841,162 @@ mod tests {
         press(&mut app, KeyCode::Down);
         press(&mut app, KeyCode::Char('k'));
         assert_eq!(app.missing_list.selected(), Some(1));
+    }
+
+    fn picker_marks(app: &App) -> Vec<(&str, Mark)> {
+        let node = app.picker.as_ref().unwrap().node;
+        app.context.collections.items.iter().map(|c| (c.name.as_str(), app.collection_mark(c, node))).collect()
+    }
+
+    fn saved_collection(f: &Fixture, id: &str) -> Vec<String> {
+        let root = f.config.load_settings().unwrap().root.unwrap();
+        crate::collections::load(&root).get(id).unwrap().fonts.clone()
+    }
+
+    #[test]
+    fn plus_opens_the_collection_picker_for_the_selected_node_and_esc_closes_it() {
+        let f = fixture();
+        let mut app = open(&f);
+        select(&mut app, "Foundry B/");
+
+        press(&mut app, KeyCode::Char('+'));
+        let picker = app.picker.as_ref().expect("picker is open");
+        assert_eq!(picker.node, app.tree.find("Foundry B/").unwrap());
+        assert_eq!(picker.list.selected(), Some(0));
+        assert_eq!(picker_marks(&app), [("Brand", Mark::Partial), ("Editorial", Mark::Off)]);
+
+        assert_eq!(press(&mut app, KeyCode::Esc), Action::Continue);
+        assert!(app.picker.is_none());
+        assert_eq!(app.tab, Tab::Fonts);
+    }
+
+    #[test]
+    fn enter_in_the_picker_adds_the_node_to_the_collection_and_keeps_the_picker_open() {
+        let f = fixture();
+        let mut app = open(&f);
+        press(&mut app, KeyCode::Char('+'));
+        press(&mut app, KeyCode::Down);
+
+        press(&mut app, KeyCode::Enter);
+
+        assert_eq!(saved_collection(&f, "c2"), ["Foundry A/"]);
+        assert!(saved_settings(&f).enabled.is_empty());
+        assert!(registered(&app).is_empty(), "the collection is not enabled");
+        assert_eq!(app.message.as_deref(), Some("Added Foundry A/ to Editorial. Registered 0, unregistered 0."));
+        assert_eq!(picker_marks(&app), [("Brand", Mark::Off), ("Editorial", Mark::On)]);
+        assert_eq!(app.picker.as_ref().unwrap().list.selected(), Some(1));
+        assert_eq!(app.mark(app.tree.find("Foundry A/").unwrap()), Mark::Off, "marks show the personal settings");
+
+        press(&mut app, KeyCode::Up);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(saved_collection(&f, "c1"), ["Foundry A/", "Foundry B/Antiqua.otf"]);
+    }
+
+    #[test]
+    fn enter_in_the_picker_on_a_full_collection_removes_the_node() {
+        let f = fixture();
+        let mut app = open_with_all_collection(&f);
+        select(&mut app, "Foundry A/");
+        press(&mut app, KeyCode::Right);
+        select(&mut app, "Foundry A/Sans/");
+        press(&mut app, KeyCode::Char('+'));
+        assert_eq!(picker_marks(&app)[0], ("All", Mark::On));
+
+        press(&mut app, KeyCode::Enter);
+
+        let fonts = saved_collection(&f, "c0");
+        assert!(!fonts.iter().any(|e| e.starts_with("Foundry A/Sans/") || e == "Foundry A/"), "{fonts:?}");
+        assert!(fonts.contains(&"Foundry A/Serif/".to_string()), "{fonts:?}");
+        assert!(fonts.contains(&"Foundry B/".to_string()), "{fonts:?}");
+        assert_eq!(picker_marks(&app)[0], ("All", Mark::Off));
+        assert!(app.message.as_deref().unwrap().starts_with("Removed Foundry A/Sans/ from All."));
+    }
+
+    #[test]
+    fn a_picker_change_to_an_enabled_collection_registers_the_fonts() {
+        let f = fixture();
+        enable_collection(&f, "c2");
+        let mut app = open(&f);
+        press(&mut app, KeyCode::Char('+'));
+        press(&mut app, KeyCode::Down);
+
+        press(&mut app, KeyCode::Enter);
+
+        assert_eq!(registered(&app).len(), 3);
+        assert_eq!(app.mark(app.tree.find("Foundry A/").unwrap()), Mark::Collection);
+    }
+
+    #[test]
+    fn plus_without_collections_shows_a_message() {
+        let f = fixture();
+        let mut app = open(&f);
+        press(&mut app, KeyCode::Tab);
+        for _ in 0..2 {
+            press(&mut app, KeyCode::Char('d'));
+            press(&mut app, KeyCode::Char('y'));
+        }
+        press(&mut app, KeyCode::BackTab);
+
+        press(&mut app, KeyCode::Char('+'));
+
+        assert!(app.picker.is_none());
+        assert_eq!(app.message.as_deref(), Some("No collections. Press n in the Collections tab to create one."));
+    }
+
+    #[test]
+    fn plus_during_a_jump_is_jump_text() {
+        let f = fixture();
+        let mut app = open(&f);
+        let start = Instant::now();
+        press_at(&mut app, KeyCode::Char('f'), start, 0);
+        press_at(&mut app, KeyCode::Char('+'), start, 100);
+        assert!(app.picker.is_none());
+
+        press_at(&mut app, KeyCode::Char('+'), start, 1000);
+        assert!(app.picker.is_some());
+    }
+
+    #[test]
+    fn plus_does_nothing_in_edit_mode_and_in_replace_mode() {
+        let f = fixture();
+        let mut app = open(&f);
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('e'));
+        press(&mut app, KeyCode::Char('+'));
+        assert!(app.picker.is_none());
+
+        let mut app = open_with_missing(&f);
+        press(&mut app, KeyCode::BackTab);
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Char('+'));
+        assert!(app.picker.is_none());
+    }
+
+    #[test]
+    fn the_picker_gets_all_keys_but_ctrl_c_still_quits() {
+        let f = fixture();
+        let mut app = open(&f);
+        press(&mut app, KeyCode::Char('+'));
+        for code in [KeyCode::Tab, KeyCode::Char('/'), KeyCode::Char('b'), KeyCode::Right] {
+            press(&mut app, code);
+        }
+        assert!(app.picker.is_some());
+        assert_eq!(app.tab, Tab::Fonts);
+        assert!(!app.searching);
+        assert!(app.expanded.is_empty());
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(app.handle_key(ctrl_c), Action::Quit);
+    }
+
+    #[test]
+    fn the_mouse_does_nothing_while_the_picker_is_open() {
+        let f = fixture();
+        let mut app = open(&f);
+        draw(&mut app);
+        press(&mut app, KeyCode::Char('+'));
+        click(&mut app, 3, 2);
+        click(&mut app, 15, 0);
+        assert_eq!(selected_path(&app), "Foundry A/");
+        assert_eq!(app.tab, Tab::Fonts);
     }
 }

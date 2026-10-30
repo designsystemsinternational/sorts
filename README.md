@@ -69,6 +69,7 @@ sorts
 | `a`–`z` `0`–`9`   | Jump to a row by its name         |                                    |
 | `enter`           | Enable / disable a folder or font | Enable / disable a collection      |
 | `/`               | Search                            | Search the fonts                   |
+| `+`               | Add to / remove from collections  |                                    |
 | `n` `r` `d`       |                                   | New / rename / delete a collection |
 | `e`               |                                   | Edit the fonts in a collection     |
 | `tab` `shift-tab` | Switch tabs                       | Switch tabs                        |

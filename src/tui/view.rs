@@ -8,7 +8,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 
 pub fn render(app: &mut App, frame: &mut Frame) {
     let [header, body, message, help] =
@@ -67,8 +67,34 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             }
         }
     }
+    if app.picker.is_some() {
+        render_picker(app, frame, body);
+    }
     frame.render_widget(message_line(app), message);
     frame.render_widget(help_line(app), help);
+}
+
+/// The collection picker: a box over the font tree with one row per collection.
+fn render_picker(app: &mut App, frame: &mut Frame, body: Rect) {
+    let Some(picker) = &app.picker else { return };
+    let node = picker.node;
+    let items: Vec<ListItem<'static>> = app
+        .context
+        .collections
+        .items
+        .iter()
+        .map(|c| ListItem::new(format!(" {} {}", checkbox(app.collection_mark(c, node)), c.name)))
+        .collect();
+    let title = format!(" Collections for {} ", app.tree.nodes[node].path);
+    let width = (title.chars().count() as u16 + 4).max(40).min(body.width);
+    let height = (items.len() as u16 + 2).min(body.height);
+    let area = Rect::new(body.x + (body.width - width) / 2, body.y + (body.height - height) / 2, width, height);
+    frame.render_widget(Clear, area);
+    let block = Block::bordered().title(title.bold());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let picker = app.picker.as_mut().expect("picker is open");
+    frame.render_stateful_widget(list(items), inner, &mut picker.list);
 }
 
 fn title(tab: Tab) -> &'static str {
@@ -166,6 +192,7 @@ fn help_line(app: &App) -> Line<'static> {
         Some(Input { prompt: Prompt::ConfirmReplace { .. }, .. }) => vec![("Y", "Replace"), ("Other keys", "Cancel")],
         Some(Input { prompt: Prompt::ConfirmRemove { .. }, .. }) => vec![("Y", "Remove"), ("Other keys", "Cancel")],
         Some(_) => vec![("Enter", "Save"), ("Esc", "Cancel")],
+        None if app.picker.is_some() => vec![("Enter", "Add/remove"), ("↑↓", "Select"), ("Esc", "Done")],
         None if app.searching => vec![("Type", "Search"), ("Enter", "Done"), ("Esc", "Clear")],
         None if app.editing.is_some() => {
             vec![("Enter", "Add/remove"), ("←→", "Close/open"), ("A-Z", "Jump"), ("/", "Search"), esc]
@@ -179,6 +206,7 @@ fn help_line(app: &App) -> Line<'static> {
                 ("←→", "Close/open"),
                 ("A-Z", "Jump"),
                 ("/", "Search"),
+                ("+", "Collections"),
                 ("Tab", "Collections"),
                 esc,
             ]
@@ -534,6 +562,15 @@ mod tests {
         press(&mut app, KeyCode::Char('e'));
         press(&mut app, KeyCode::Down);
         press(&mut app, KeyCode::Right);
+        insta::assert_snapshot!(draw(&mut app));
+    }
+
+    #[test]
+    fn collection_picker() {
+        let f = fixture();
+        let mut app = open_with_all_collection(&f);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Char('+'));
         insta::assert_snapshot!(draw(&mut app));
     }
 

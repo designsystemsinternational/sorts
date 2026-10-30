@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                                                                "
 "                                                                                "
 " Enabled Foundry B/Antiqua.otf. Registered 1, unregistered 0.                   "
-" Enter : Toggle | ←→ : Close/open | A-Z : Jump | / : Search | Tab : Collections "
+" Enter : Toggle | ←→ : Close/open | A-Z : Jump | / : Search | + : Collections | "

@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                                                                "
 "                                                                                "
 " Enabled Foundry A/Sans/. Registered 2, unregistered 0.                         "
-" Enter : Toggle | ←→ : Close/open | A-Z : Jump | / : Search | Tab : Collections "
+" Enter : Toggle | ←→ : Close/open | A-Z : Jump | / : Search | + : Collections | "

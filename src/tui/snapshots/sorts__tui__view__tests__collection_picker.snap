@@ -1,0 +1,16 @@
+---
+source: src/tui/view.rs
+expression: draw(&mut app)
+---
+" Fonts   Collections   Settings                                                 "
+" ▸ [ ] Foundry A  0/3                                                           "
+" ▸ [ ] Foundry B  0/2                                                           "
+"                    ┌ Collections for Foundry B/ ──────────┐                    "
+"                    │ [x] All                              │                    "
+"                    │ [~] Brand                            │                    "
+"                    │ [ ] Editorial                        │                    "
+"                    └──────────────────────────────────────┘                    "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" Enter : Add/remove | ↑↓ : Select | Esc : Done                                  "
