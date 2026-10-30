@@ -203,8 +203,8 @@ impl App {
         }
         if self.moving {
             match key.code {
-                KeyCode::Down | KeyCode::Char('j') => return self.move_format(1),
-                KeyCode::Up | KeyCode::Char('k') => return self.move_format(-1),
+                KeyCode::Down => return self.move_format(1),
+                KeyCode::Up => return self.move_format(-1),
                 KeyCode::Enter | KeyCode::Esc => {
                     self.moving = false;
                     return Action::Continue;
@@ -226,12 +226,8 @@ impl App {
             (_, KeyCode::Tab | KeyCode::BackTab) if self.replacing.is_some() => self.stop_replacing(),
             (_, KeyCode::Tab) => self.tab = self.other_tab(1),
             (_, KeyCode::BackTab) => self.tab = self.other_tab(-1),
-            (_, KeyCode::Down) | (Tab::Collections | Tab::Settings | Tab::Missing, KeyCode::Char('j')) => {
-                self.move_selection(1)
-            }
-            (_, KeyCode::Up) | (Tab::Collections | Tab::Settings | Tab::Missing, KeyCode::Char('k')) => {
-                self.move_selection(-1)
-            }
+            (_, KeyCode::Down) => self.move_selection(1),
+            (_, KeyCode::Up) => self.move_selection(-1),
             (Tab::Fonts, KeyCode::Right) => self.expand(),
             (Tab::Fonts, KeyCode::Left) => self.collapse(),
             (Tab::Fonts, KeyCode::Enter) if self.replacing.is_some() => self.ask_replace(),
@@ -1688,13 +1684,14 @@ mod tests {
     }
 
     #[test]
-    fn j_and_k_move_in_the_missing_tab() {
+    fn j_and_k_do_not_move_in_the_missing_tab() {
         let f = fixture();
         let mut app = open_with_missing(&f);
         press(&mut app, KeyCode::BackTab);
         press(&mut app, KeyCode::Char('j'));
-        assert_eq!(app.missing_list.selected(), Some(1));
-        press(&mut app, KeyCode::Char('k'));
         assert_eq!(app.missing_list.selected(), Some(0));
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Char('k'));
+        assert_eq!(app.missing_list.selected(), Some(1));
     }
 }
