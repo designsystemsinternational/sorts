@@ -195,10 +195,17 @@ fn help_line(app: &App) -> Line<'static> {
         None if app.picker.is_some() => vec![("Enter", "Add/remove"), ("↑↓", "Select"), ("Esc", "Done")],
         None if app.searching => vec![("Type", "Search"), ("Enter", "Done"), ("Esc", "Clear")],
         None if app.editing.is_some() => {
-            vec![("Enter", "Add/remove"), ("←→", "Close/open"), ("A-Z", "Jump"), ("/", "Search"), esc]
+            vec![
+                ("Enter", "Add/remove"),
+                ("←→", "Close/open"),
+                ("A-Z", "Jump"),
+                ("/", "Search"),
+                ("^P", "Preview"),
+                esc,
+            ]
         }
         None if app.replacing.is_some() => {
-            vec![("Enter", "Choose"), ("←→", "Close/open"), ("A-Z", "Jump"), ("/", "Search"), esc]
+            vec![("Enter", "Choose"), ("←→", "Close/open"), ("A-Z", "Jump"), ("/", "Search"), ("^P", "Preview"), esc]
         }
         None if app.tab == Tab::Fonts => {
             vec![
@@ -207,6 +214,7 @@ fn help_line(app: &App) -> Line<'static> {
                 ("A-Z", "Jump"),
                 ("/", "Search"),
                 ("+", "Collections"),
+                ("^P", "Preview"),
                 ("Tab", "Collections"),
                 esc,
             ]
@@ -222,7 +230,15 @@ fn help_line(app: &App) -> Line<'static> {
         None if app.tab == Tab::Missing => {
             vec![("Enter", "Replace"), ("D", "Remove"), ("↑↓", "Select"), ("Tab", "Fonts"), esc]
         }
-        None => vec![("Enter", "Enable/disable"), ("E", "Edit"), ("N", "New"), ("R", "Rename"), ("D", "Delete"), esc],
+        None => vec![
+            ("Enter", "Enable/disable"),
+            ("E", "Edit"),
+            ("N", "New"),
+            ("R", "Rename"),
+            ("D", "Delete"),
+            ("^P", "Preview"),
+            esc,
+        ],
     };
     let text = keys.iter().map(|(key, action)| format!("{key} : {action}")).collect::<Vec<_>>().join(" | ");
     Line::from(format!(" {text}")).dim()

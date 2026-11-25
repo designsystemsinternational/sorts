@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                │                                               "
 "                                │                                               "
 "                                                                                "
-" Enter : Enable/disable | E : Edit | N : New | R : Rename | D : Delete | Esc : Q"
+" Enter : Enable/disable | E : Edit | N : New | R : Rename | D : Delete | ^P : Pr"

@@ -21,26 +21,35 @@ pub fn active_fonts(library: &Library, settings: &Settings, collections: &Collec
         }
     }
 
+    let candidates = library.fonts.iter().filter(|f| f.error.is_none() && entry::matches_any(&entries, &f.id));
+    let mut active: Vec<String> =
+        pick_formats(candidates, &settings.format_order).into_iter().map(|f| f.id.clone()).collect();
+    active.sort();
+    active
+}
+
+/// Keeps one file per PostScript name: the file whose extension comes first in `format_order`
+/// (ties: first ID in alphabetical order). Files without PostScript names (e.g. unreadable
+/// files) are all kept. The result is in preference order, not in ID order.
+pub fn pick_formats<'a>(fonts: impl IntoIterator<Item = &'a FontFile>, format_order: &[String]) -> Vec<&'a FontFile> {
     let rank = |font: &FontFile| {
         let ext = font.extension();
-        settings.format_order.iter().position(|f| f.eq_ignore_ascii_case(&ext)).unwrap_or(usize::MAX)
+        format_order.iter().position(|f| f.eq_ignore_ascii_case(&ext)).unwrap_or(usize::MAX)
     };
-    let mut candidates: Vec<&FontFile> =
-        library.fonts.iter().filter(|f| f.error.is_none() && entry::matches_any(&entries, &f.id)).collect();
+    let mut candidates: Vec<&FontFile> = fonts.into_iter().collect();
     candidates.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.id.cmp(&b.id)));
 
     let mut taken: HashSet<&str> = HashSet::new();
-    let mut active = Vec::new();
+    let mut picked = Vec::new();
     for font in candidates {
         let names: Vec<&str> = font.faces.iter().map(|f| f.postscript.as_str()).filter(|ps| !ps.is_empty()).collect();
         if names.iter().any(|ps| taken.contains(ps)) {
             continue;
         }
         taken.extend(names);
-        active.push(font.id.clone());
+        picked.push(font);
     }
-    active.sort();
-    active
+    picked
 }
 
 #[cfg(test)]

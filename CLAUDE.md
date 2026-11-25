@@ -16,6 +16,7 @@ The special feature: a team shares one `Fonts` folder (on Google Drive), and eac
 - Settings tab (after Collections) is done: change `formatOrder` in the TUI.
 - `sorts fix` + Missing tab is done: the user replaces or removes entries that point to moved fonts.
 - Scan progress is done: online-only files are downloaded by the scan, and stderr shows the progress (see "Online-only files").
+- Font preview is done: `ctrl-p` opens the fonts of the current list in the browser (see "Preview").
 - `--debug` is done (see "Debug log"). It was added because the scan hung for a teammate with no visible progress.
 - Roadmap step 5 is prepared: public repo + public tap `designsystemsinternational/homebrew-tap`, formula builds from source. See `docs/RELEASING.md`. The user does all Git work (repos, tags, pushes) themselves.
 - The user tries the CLI from source (`cargo run --release --` / `cargo install --path .`, see README "Run from source") and gives feedback.
@@ -47,6 +48,8 @@ src/
   sync.rs        Reconciliation plan + apply.
   activator.rs   FontActivator trait, FakeActivator, FileFakeActivator, CoreTextActivator.
   testing.rs     Generates complete TrueType test fonts (also used by tests/).
+  preview.rs     Preview page: model (`page`, pure) + HTML (`html`, template `preview.html`), Previewer trait + FakePreviewer.
+  preview_server.rs Local HTTP server for the preview (127.0.0.1, random port + token) and BrowserPreviewer (`open <url>`).
   typefaces.rs   Groups the fonts of a list of entries by family (typeface name + style count).
   facets.rs      Facet analyzers (class, spacing, variable): the Analyzer trait and the ANALYZERS list.
   query.rs       Search query parsing: text terms + facet terms (`key:value`), with the error message.
@@ -249,13 +252,22 @@ Built (roadmap step 3). A tree that mirrors the folder structure (see the snapsh
 
 - `[x]` all fonts enabled in the personal settings, `[~]` some, `[c]` none, but some are active through an enabled collection, `[ ]` none. Folders show `enabled/total`. Unreadable files show `unreadable`.
 - Folders first, then files, each sorted case-insensitively.
-- Keys: `↑↓` move (there are no `jk` keys), `→` open, `←` close or go to the parent folder, `enter` toggle (`space` does nothing), `+` collection picker (see Collections), `/` search, `tab`/`shift-tab` switch tabs, `esc` quits, `ctrl-c` always quits. `q` does not quit. While typing a search: `enter` keeps the filter, `esc` clears it. `esc` with a kept filter clears it first.
+- Keys: `↑↓` move (there are no `jk` keys), `→` open, `←` close or go to the parent folder, `enter` toggle (`space` does nothing), `+` collection picker (see Collections), `ctrl-p` preview (see Preview), `/` search, `tab`/`shift-tab` switch tabs, `esc` quits, `ctrl-c` always quits. `q` does not quit. While typing a search: `enter` keeps the filter, `esc` clears it. `esc` with a kept filter clears it first.
 - **Mouse** (`App::handle_mouse`, mouse capture in `tui/terminal.rs`): the wheel scrolls the list under the pointer and does not change the selection. In the Collections tab, the left list and the typeface column scroll separately (`App::typeface_offset`, area in `App::typeface_area`). The typeface column starts at the top for each newly selected collection, and stops when its last row is at the bottom. A left click selects the row under the pointer (and puts down a picked-up format). A left click on a tab title (`App::tab_areas`, also stored by the view) switches to that tab: it ends edit mode, search typing (the filter stays), and a picked-up format. A click on the current tab does nothing, so a click on "Fonts" in edit mode keeps edit mode. The view stores the list area of the last draw in `App::list_area`; events outside it are ignored. While a prompt is open, the mouse does nothing. After a scroll (`App::scrolled`, cleared by the next key), the list is drawn without the selection if the selected row is out of view, because ratatui scrolls a list back to its selected row. The next key brings the selection back into view.
 - **Jump** (Fonts tab, also in edit mode), as in macOS lists: a letter or digit starts a jump text and selects the next visible row (after the selected one, wrapping) whose name starts with it, case-insensitive. Each key within 500 ms of the previous one (`JUMP_TIMEOUT`) adds to the text, also a space or punctuation (not `/`), and the search then starts at the selected row, so "se" can keep or move the selection. No match: the selection stays. Any other key or a mouse event ends the text. Tests pass the time with `App::handle_key_at`. This is why the Fonts tab has no letter commands (no `q`, no `hjkl`).
 - **Search**: whitespace-separated terms, all must match (case-insensitive substring). A folder matches on its path; a file matches on its ID, family names, and PostScript names. Matches are shown with their parent folders, and those parents are opened automatically. A folder that matches itself stays closed and shows all its children when opened. Facet terms (`class:serif`) are part of the same search; see "Facets".
 - **Toggle**: a fully enabled node (`[x]`) is disabled; anything else is enabled. The new `enabled` entries are rebuilt from the set of enabled fonts (`Tree::set_enabled`): a folder whose fonts are all enabled becomes one folder entry (so new fonts in it are included later), and disabling one file in an enabled folder splits that folder entry into entries for the rest. Entries that match no font are kept.
 - **A toggle applies only its own change** (`sync::apply_changes` on the active set before vs. after). Fonts that are enabled but not registered yet (e.g. a teammate added them) still wait for `sorts sync`.
 - The settings and the state are saved after every toggle. The result or error shows in the message line.
+
+### Preview (in the TUI)
+
+- `ctrl-p` (`App::preview`) works in the Fonts tab (also in edit and replace mode, and while typing a search) and in the Collections tab. It does nothing while a prompt or the picker is open. The Settings and Missing tabs show "Open a preview from the Fonts or Collections tab."
+- **The list:** Fonts tab: all fonts, or with a search all files that match (also in closed folders; `Tree::rows` with all folders expanded), in tree order. The page starts at the section of the selected folder (for a file: its parent folder). Collections tab: the fonts of the selected collection. Empty: "No fonts to preview."
+- When files share a PostScript name, the page shows only the file that `formatOrder` prefers (`active::pick_formats`, shared with `active_fonts`).
+- **Page:** consecutive fonts of the same folder form a section with a slim marker and the folder name. Each row: family + style, file name, sample. A text field and a size slider (8–200 px, default 48) change all samples in the browser. Text and size are not remembered (user decision). Unreadable files and `.ttc`/`.otc` (browsers often cannot load collections) show a note and no sample.
+- **Loading:** an `IntersectionObserver` loads each font (`FontFace` from `font/<n>`) only when its row comes near the view, so a preview of all fonts loads only what is visible. A font that the browser rejects shows "The browser could not load this font." Chrome rejects the minimal fonts of `sorts::testing` (OTS); real fonts load (checked with headless Chrome and a system font, November 2026).
+- **Why a server:** browsers do not load fonts from `file://` pages reliably, `local()` needs registered fonts, and base64 makes big pages and downloads all online-only files. `preview_server::Server` starts at the first `ctrl-p` and stops with the process. URLs: `/<token>/<page>/` and `/<token>/<page>/font/<n>`. It serves only files of a published page, by number (never a path from the request). It keeps the last 20 pages.
 
 ### Collections (in the TUI)
 

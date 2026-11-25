@@ -13,4 +13,4 @@ expression: draw(&mut app)
 "                                                                                "
 "                                                                                "
 " Select the new location of Old/Sans/. Enter chooses it. Esc cancels.           "
-" Enter : Choose | ←→ : Close/open | A-Z : Jump | / : Search | Esc : Cancel      "
+" Enter : Choose | ←→ : Close/open | A-Z : Jump | / : Search | ^P : Preview | Esc"

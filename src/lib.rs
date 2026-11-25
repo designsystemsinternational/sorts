@@ -5,6 +5,8 @@ pub mod collections;
 pub mod debug;
 pub mod entry;
 pub mod facets;
+pub mod preview;
+pub mod preview_server;
 pub mod progress;
 pub mod query;
 pub mod scan;

@@ -191,7 +191,8 @@ fn interactive(context: app::Context, config: ConfigDir, tab: tui::Tab) -> anyho
         std::io::stdout().is_terminal(),
         "The interactive list needs a terminal. Use `sorts --help` for the other commands."
     );
-    let mut app = tui::App::new(context, config, activator());
+    let mut app =
+        tui::App::new(context, config, activator(), Box::new(sorts::preview_server::BrowserPreviewer::default()));
     app.tab = tab;
     tui::terminal::run(&mut app)
 }

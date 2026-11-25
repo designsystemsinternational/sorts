@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}} · sorts</title>
+<style>
+:root {
+  --size: {{size}}px;
+  --bg: #ffffff;
+  --fg: #111111;
+  --muted: #6b6b6b;
+  --line: #d9d9d9;
+  --marker: #111111;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161616;
+    --fg: #f0f0f0;
+    --muted: #9a9a9a;
+    --line: #333333;
+    --marker: #f0f0f0;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+}
+header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  padding: 12px 24px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+header h1 { margin: 0; font-size: 13px; font-weight: 600; }
+header h1 span { color: var(--muted); font-weight: 400; }
+header label { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+#text { flex: 1; min-width: 240px; }
+#text input { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--fg); }
+#size-number { width: 56px; font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--fg); }
+main { padding: 0 24px 48px; }
+section { margin-top: 32px; scroll-margin-top: 64px; }
+h2 {
+  margin: 0 0 4px;
+  padding: 4px 0 4px 10px;
+  border-left: 2px solid var(--marker);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.font { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.label { display: flex; gap: 12px; align-items: baseline; color: var(--muted); font-size: 12px; }
+.label .name { color: var(--fg); }
+.sample {
+  margin-top: 4px;
+  font-size: var(--size);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  min-height: 1.2em;
+  color: transparent;
+}
+.font.loaded .sample { color: var(--fg); }
+.note, .font.failed .sample { margin-top: 4px; color: var(--muted); font-size: 12px; min-height: 0; }
+</style>
+</head>
+<body>
+<header>
+<h1>{{title}} <span>{{count}}</span></h1>
+<label id="text">Text <input value="{{text}}" spellcheck="false"></label>
+<label>Size <input id="size" type="range" min="{{min}}" max="{{max}}" value="{{size}}"><input id="size-number" type="number" min="{{min}}" max="{{max}}" value="{{size}}"></label>
+</header>
+<main>
+{{body}}</main>
+<script>
+const defaultText = document.querySelector("#text input").defaultValue;
+const samples = document.getElementsByClassName("sample");
+
+document.querySelector("#text input").addEventListener("input", (event) => {
+  const text = event.target.value || defaultText;
+  for (const sample of samples) {
+    if (!sample.parentElement.classList.contains("failed")) sample.textContent = text;
+  }
+});
+
+const range = document.getElementById("size");
+const number = document.getElementById("size-number");
+function setSize(value, source) {
+  const size = Math.min({{max}}, Math.max({{min}}, Number(value) || {{size}}));
+  document.documentElement.style.setProperty("--size", size + "px");
+  if (source !== range) range.value = size;
+  if (source !== number) number.value = size;
+}
+range.addEventListener("input", () => setSize(range.value, range));
+number.addEventListener("input", () => setSize(number.value, number));
+
+// Load each font only when its row comes near the view, so a long list loads only what you see.
+const observer = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    if (!entry.isIntersecting) continue;
+    const row = entry.target;
+    observer.unobserve(row);
+    const family = "sorts-" + row.dataset.n;
+    new FontFace(family, "url(font/" + row.dataset.n + ")").load().then(
+      (face) => {
+        document.fonts.add(face);
+        row.querySelector(".sample").style.fontFamily = '"' + family + '"';
+        row.classList.add("loaded");
+      },
+      () => {
+        row.classList.add("failed");
+        row.querySelector(".sample").textContent = "The browser could not load this font.";
+      }
+    );
+  }
+}, { rootMargin: "100% 0px" });
+for (const row of document.querySelectorAll(".font[data-n]")) observer.observe(row);
+
+const start = {{start}};
+if (start) document.getElementById(start).scrollIntoView();
+</script>
+</body>
+</html>

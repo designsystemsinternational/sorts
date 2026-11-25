@@ -8,6 +8,7 @@ use crate::activator::FontActivator;
 use crate::app::{Context, MissingEntry, Owner};
 use crate::collections::{self, Collection};
 use crate::entry;
+use crate::preview::{self, Previewer};
 use crate::query::Query;
 use crate::settings::{ConfigDir, Settings};
 use crate::sync;
@@ -90,6 +91,7 @@ pub struct App {
     pub context: Context,
     config: ConfigDir,
     activator: Box<dyn FontActivator>,
+    previewer: Box<dyn Previewer>,
     pub tree: Tree,
     pub tab: Tab,
     pub expanded: HashSet<usize>,
@@ -141,12 +143,18 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(context: Context, config: ConfigDir, activator: Box<dyn FontActivator>) -> Self {
+    pub fn new(
+        context: Context,
+        config: ConfigDir,
+        activator: Box<dyn FontActivator>,
+        previewer: Box<dyn Previewer>,
+    ) -> Self {
         let tree = Tree::build(&context.library);
         let mut app = Self {
             context,
             config,
             activator,
+            previewer,
             tree,
             tab: Tab::Fonts,
             expanded: HashSet::new(),
@@ -226,6 +234,11 @@ impl App {
             self.handle_picker_key(key.code);
             return Action::Continue;
         }
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('p') {
+            self.moving = false;
+            self.preview();
+            return Action::Continue;
+        }
         if self.searching {
             self.handle_search_key(key.code);
             return Action::Continue;
@@ -293,6 +306,63 @@ impl App {
             _ => {}
         }
         Action::Continue
+    }
+
+    /// Opens the fonts of the current list in the browser: in the Fonts tab, all fonts (or the
+    /// matches of the search), with the page at the selected folder; in the Collections tab, the
+    /// fonts of the selected collection.
+    fn preview(&mut self) {
+        let library = &self.context.library;
+        let all_folders: HashSet<usize> =
+            (0..self.tree.nodes.len()).filter(|&n| self.tree.nodes[n].kind == Kind::Folder).collect();
+        let (title, query, include, start): (String, &str, Option<&[String]>, Option<String>) = match self.tab {
+            Tab::Fonts => {
+                let title = match self.search.trim() {
+                    "" => "All fonts".to_string(),
+                    search => format!("Search: {search}"),
+                };
+                let start = self.selected_node().map(|n| {
+                    let node = &self.tree.nodes[n];
+                    match node.kind {
+                        Kind::Folder => node.path.clone(),
+                        Kind::File => self.tree.nodes[node.parent.unwrap_or(ROOT)].path.clone(),
+                    }
+                });
+                (title, self.search.as_str(), None, start)
+            }
+            Tab::Collections => match self.selected_collection() {
+                Some(c) => (c.name.clone(), "", Some(c.fonts.as_slice()), None),
+                None => {
+                    self.message = Some("No collection to preview.".into());
+                    return;
+                }
+            },
+            _ => {
+                self.message = Some("Open a preview from the Fonts or Collections tab.".into());
+                return;
+            }
+        };
+        // All folders open: the rows are then all files of the list, in tree order.
+        let fonts: Vec<usize> = self
+            .tree
+            .rows(library, &all_folders, query)
+            .into_iter()
+            .map(|row| &self.tree.nodes[row.node])
+            .filter(|node| node.kind == Kind::File)
+            .map(|node| node.fonts.start)
+            .filter(|&i| include.is_none_or(|entries| entry::matches_any(entries, &library.fonts[i].id)))
+            .collect();
+        let page = preview::page(library, &title, &fonts, &self.context.settings.format_order, start.as_deref());
+        if page.is_empty() {
+            self.message = Some("No fonts to preview.".into());
+            return;
+        }
+        let files = page.files().into_iter().map(|id| library.path_of(id)).collect();
+        self.message = Some(match self.previewer.show(&page, files) {
+            Ok(()) if page.len() == 1 => "Opened a preview of 1 font in the browser.".into(),
+            Ok(()) => format!("Opened a preview of {} fonts in the browser.", page.len()),
+            Err(error) => error.to_string(),
+        });
     }
 
     /// The mouse wheel scrolls the list under the pointer without a change to the selection. In the
@@ -830,7 +900,10 @@ mod tests {
     use super::*;
     use crate::activator::FakeActivator;
     use crate::app;
+    use crate::preview::{FakePreviewer, Page};
     use crate::testing::{write_file, write_font};
+    use std::cell::RefCell;
+    use std::rc::Rc;
     use std::time::{Duration, Instant};
 
     pub(crate) struct Fixture {
@@ -858,7 +931,12 @@ mod tests {
     }
 
     pub(crate) fn open(f: &Fixture) -> App {
-        App::new(Context::load(&f.config).unwrap(), f.config.clone(), Box::new(FakeActivator::default()))
+        App::new(
+            Context::load(&f.config).unwrap(),
+            f.config.clone(),
+            Box::new(FakeActivator::default()),
+            Box::new(FakePreviewer::default()),
+        )
     }
 
     pub(crate) fn press(app: &mut App, code: KeyCode) -> Action {
@@ -2060,5 +2138,137 @@ mod tests {
         click(&mut app, 15, 0);
         assert_eq!(selected_path(&app), "Foundry A/");
         assert_eq!(app.tab, Tab::Fonts);
+    }
+
+    fn ctrl_p(app: &mut App) -> Action {
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL))
+    }
+
+    fn open_with_preview(f: &Fixture) -> (App, Rc<RefCell<Vec<Page>>>) {
+        let previewer = FakePreviewer::default();
+        let pages = previewer.pages.clone();
+        let app = App::new(
+            Context::load(&f.config).unwrap(),
+            f.config.clone(),
+            Box::new(FakeActivator::default()),
+            Box::new(previewer),
+        );
+        (app, pages)
+    }
+
+    fn last_files(pages: &Rc<RefCell<Vec<Page>>>) -> Vec<String> {
+        pages.borrow().last().unwrap().files().into_iter().map(String::from).collect()
+    }
+
+    #[test]
+    fn ctrl_p_in_the_fonts_tab_previews_all_fonts_and_starts_at_the_selected_folder() {
+        let f = fixture();
+        let (mut app, pages) = open_with_preview(&f);
+        assert_eq!(ctrl_p(&mut app), Action::Continue);
+        assert_eq!(
+            last_files(&pages),
+            [
+                "Foundry A/Sans/Sans-Bold.otf",
+                "Foundry A/Sans/Sans-Regular.otf",
+                "Foundry A/Serif/Serif-Regular.otf",
+                "Foundry B/Antiqua.otf",
+                "Foundry B/Broken.ttf",
+            ]
+        );
+        let page = pages.borrow().last().unwrap().clone();
+        assert_eq!(page.title, "All fonts");
+        assert_eq!(page.start, Some(0));
+        assert_eq!(app.message.as_deref(), Some("Opened a preview of 5 fonts in the browser."));
+
+        press(&mut app, KeyCode::Down); // Foundry B/
+        ctrl_p(&mut app);
+        assert_eq!(pages.borrow().last().unwrap().start, Some(2));
+    }
+
+    #[test]
+    fn ctrl_p_on_a_file_starts_at_its_folder() {
+        let f = fixture();
+        let (mut app, pages) = open_with_preview(&f);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Right);
+        select(&mut app, "Foundry B/Antiqua.otf");
+        ctrl_p(&mut app);
+        assert_eq!(pages.borrow().last().unwrap().start, Some(2));
+    }
+
+    #[test]
+    fn ctrl_p_with_a_search_previews_the_matches_also_while_typing() {
+        let f = fixture();
+        let (mut app, pages) = open_with_preview(&f);
+        press(&mut app, KeyCode::Char('/'));
+        type_text(&mut app, "sans");
+        ctrl_p(&mut app);
+        assert!(app.searching);
+        assert_eq!(last_files(&pages), ["Foundry A/Sans/Sans-Bold.otf", "Foundry A/Sans/Sans-Regular.otf"]);
+        assert_eq!(pages.borrow().last().unwrap().title, "Search: sans");
+        assert_eq!(app.search, "sans");
+    }
+
+    #[test]
+    fn ctrl_p_in_the_collections_tab_previews_the_selected_collection() {
+        let f = fixture();
+        let (mut app, pages) = open_with_preview(&f);
+        press(&mut app, KeyCode::Tab);
+        ctrl_p(&mut app);
+        assert_eq!(last_files(&pages), ["Foundry B/Antiqua.otf"]);
+        assert_eq!(pages.borrow().last().unwrap().title, "Brand");
+        assert_eq!(app.message.as_deref(), Some("Opened a preview of 1 font in the browser."));
+
+        press(&mut app, KeyCode::Down); // Editorial, with no fonts
+        ctrl_p(&mut app);
+        assert_eq!(pages.borrow().len(), 1);
+        assert_eq!(app.message.as_deref(), Some("No fonts to preview."));
+    }
+
+    #[test]
+    fn ctrl_p_in_the_settings_tab_shows_a_message() {
+        let f = fixture();
+        let (mut app, pages) = open_with_preview(&f);
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Tab);
+        ctrl_p(&mut app);
+        assert!(pages.borrow().is_empty());
+        assert_eq!(app.message.as_deref(), Some("Open a preview from the Fonts or Collections tab."));
+    }
+
+    #[test]
+    fn ctrl_p_does_not_preview_while_a_prompt_or_the_picker_is_open() {
+        let f = fixture();
+        let (mut app, pages) = open_with_preview(&f);
+        press(&mut app, KeyCode::Char('+'));
+        ctrl_p(&mut app);
+        assert!(app.picker.is_some());
+        press(&mut app, KeyCode::Esc);
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('n'));
+        ctrl_p(&mut app);
+        assert!(app.input.is_some());
+        assert!(pages.borrow().is_empty());
+    }
+
+    struct FailingPreviewer;
+
+    impl Previewer for FailingPreviewer {
+        fn show(&mut self, _page: &Page, _files: Vec<std::path::PathBuf>) -> anyhow::Result<()> {
+            anyhow::bail!("No browser.")
+        }
+    }
+
+    #[test]
+    fn a_preview_error_shows_in_the_message_line() {
+        let f = fixture();
+        let mut app = App::new(
+            Context::load(&f.config).unwrap(),
+            f.config.clone(),
+            Box::new(FakeActivator::default()),
+            Box::new(FailingPreviewer),
+        );
+        ctrl_p(&mut app);
+        assert_eq!(app.message.as_deref(), Some("No browser."));
     }
 }

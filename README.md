@@ -77,6 +77,7 @@ sorts
 | `+`               | Add to / remove from collections  |                                    |
 | `n` `r` `d`       |                                   | New / rename / delete a collection |
 | `e`               |                                   | Edit the fonts in a collection     |
+| `ctrl-p`          | Preview the fonts in the browser  | Preview the collection             |
 | `tab` `shift-tab` | Switch tabs                       | Switch tabs                        |
 | `ctrl-c` / `esc`  | Quit                              | Quit                               |
 
@@ -95,6 +96,13 @@ from each font file every time it loads the fonts. It reads the shape of the
 letters `H` and `I` (serifs or no serifs) and the widths of some letters (mono
 or proportional). The result can be wrong for unusual fonts. Fonts that are not
 clearly serif or sans are `other`.
+
+`ctrl-p` opens a preview page in your browser. In the Fonts tab, it shows all
+fonts, or only the fonts that match the search, grouped by folder. The page
+starts at the selected folder. In the Collections tab, it shows the fonts of the
+selected collection. On the page, you can change the sample text and the size.
+The page loads each font only when it comes into view. It works while sorts is
+open. Font collections (`.ttc`, `.otc`) show no preview.
 
 Marks:
 
