@@ -12,6 +12,7 @@ The special feature: a team shares one `Fonts` folder (on Google Drive), and eac
 - Roadmap step 3 is done: the interactive list (`sorts` with no command), with search and toggles.
 - Roadmap step 4 is done: create, rename, delete, enable/disable, and edit collections in the TUI.
 - Collection picker (`+` in the Fonts tab) is done.
+- Facet search is done: `class:`, `spacing:`, `variable:` terms in the search (see "Facets").
 - Settings tab (after Collections) is done: change `formatOrder` in the TUI.
 - `sorts fix` + Missing tab is done: the user replaces or removes entries that point to moved fonts.
 - Scan progress is done: online-only files are downloaded by the scan, and stderr shows the progress (see "Online-only files").
@@ -47,12 +48,15 @@ src/
   activator.rs   FontActivator trait, FakeActivator, FileFakeActivator, CoreTextActivator.
   testing.rs     Generates complete TrueType test fonts (also used by tests/).
   typefaces.rs   Groups the fonts of a list of entries by family (typeface name + style count).
+  facets.rs      Facet analyzers (class, spacing, variable): the Analyzer trait and the ANALYZERS list.
+  query.rs       Search query parsing: text terms + facet terms (`key:value`), with the error message.
   tree.rs        Folder tree for the TUI: rows (expand + search filter) and set_enabled (toggle → entries).
   tui/mod.rs     App: all TUI state and key handling. Tested with key events.
   tui/view.rs    Drawing. Tested with ratatui TestBackend + insta snapshots (tui/snapshots/).
   tui/terminal.rs The event loop (thin, not tested).
 tests/
   cli.rs         End-to-end tests of the binary (temp folders + FileFakeActivator).
+  scale.rs       Scan with facets of 50,000 generated fonts within a time budget, #[ignore].
   coretext.rs    Real CoreText tests, process scope, #[ignore].
 ```
 
@@ -248,7 +252,7 @@ Built (roadmap step 3). A tree that mirrors the folder structure (see the snapsh
 - Keys: `↑↓` move (there are no `jk` keys), `→` open, `←` close or go to the parent folder, `enter` toggle (`space` does nothing), `+` collection picker (see Collections), `/` search, `tab`/`shift-tab` switch tabs, `esc` quits, `ctrl-c` always quits. `q` does not quit. While typing a search: `enter` keeps the filter, `esc` clears it. `esc` with a kept filter clears it first.
 - **Mouse** (`App::handle_mouse`, mouse capture in `tui/terminal.rs`): the wheel scrolls the list under the pointer and does not change the selection. In the Collections tab, the left list and the typeface column scroll separately (`App::typeface_offset`, area in `App::typeface_area`). The typeface column starts at the top for each newly selected collection, and stops when its last row is at the bottom. A left click selects the row under the pointer (and puts down a picked-up format). A left click on a tab title (`App::tab_areas`, also stored by the view) switches to that tab: it ends edit mode, search typing (the filter stays), and a picked-up format. A click on the current tab does nothing, so a click on "Fonts" in edit mode keeps edit mode. The view stores the list area of the last draw in `App::list_area`; events outside it are ignored. While a prompt is open, the mouse does nothing. After a scroll (`App::scrolled`, cleared by the next key), the list is drawn without the selection if the selected row is out of view, because ratatui scrolls a list back to its selected row. The next key brings the selection back into view.
 - **Jump** (Fonts tab, also in edit mode), as in macOS lists: a letter or digit starts a jump text and selects the next visible row (after the selected one, wrapping) whose name starts with it, case-insensitive. Each key within 500 ms of the previous one (`JUMP_TIMEOUT`) adds to the text, also a space or punctuation (not `/`), and the search then starts at the selected row, so "se" can keep or move the selection. No match: the selection stays. Any other key or a mouse event ends the text. Tests pass the time with `App::handle_key_at`. This is why the Fonts tab has no letter commands (no `q`, no `hjkl`).
-- **Search**: whitespace-separated terms, all must match (case-insensitive substring). A folder matches on its path; a file matches on its ID, family names, and PostScript names. Matches are shown with their parent folders, and those parents are opened automatically. A folder that matches itself stays closed and shows all its children when opened.
+- **Search**: whitespace-separated terms, all must match (case-insensitive substring). A folder matches on its path; a file matches on its ID, family names, and PostScript names. Matches are shown with their parent folders, and those parents are opened automatically. A folder that matches itself stays closed and shows all its children when opened. Facet terms (`class:serif`) are part of the same search; see "Facets".
 - **Toggle**: a fully enabled node (`[x]`) is disabled; anything else is enabled. The new `enabled` entries are rebuilt from the set of enabled fonts (`Tree::set_enabled`): a folder whose fonts are all enabled becomes one folder entry (so new fonts in it are included later), and disabling one file in an enabled folder splits that folder entry into entries for the rest. Entries that match no font are kept.
 - **A toggle applies only its own change** (`sync::apply_changes` on the active set before vs. after). Fonts that are enabled but not registered yet (e.g. a teammate added them) still wait for `sorts sync`.
 - The settings and the state are saved after every toggle. The result or error shows in the message line.
@@ -289,6 +293,22 @@ When someone moves or renames fonts, entries in `enabled` and in collections can
 - `entry::replace` puts the new entry at the place of the old one and does not add a duplicate. The change goes through `App::change_entries` (the same path as toggles), so the new fonts are registered at once. The old registrations of the moved files leave the state at the next `sync`.
 - `esc` (after clearing a search), `tab`, or a click on a tab title ends replace mode.
 - `d` asks to remove the entry (y/n), with the same team warning for collections.
+
+## Facets
+
+Facets are properties of a font file that the search filters on: `myfont class:serif spacing:mono variable:true`.
+
+- **Calculated at every load.** `scan::read_font` runs all analyzers on the **first face** of each file (also for `.ttc`/`.otc`) and stores the values in `FontFile::facets` (one per analyzer, in `ANALYZERS` order; empty for unreadable files). No cache, no stored values, no manual overrides (the user rejected overrides). Facets apply per file, with no family vote.
+- **Not shown in the list.** The facets are only search terms (user decision).
+- **Analyzers** (`facets.rs`):
+  - `class` (`serif`, `sans`, `other`): the shape of `H` (else `I`) decides first. At 25% from the bottom and from the top, the glyph must have 2 (`I`: 1) stems, else `other`. If the ink near the ends (0.5–5% of the height) is at least 1.35 times the stem width, it is `serif`, else `sans`. The cross-section uses the non-zero rule, so overlapping contours count once. Without `H` and `I`: the PANOSE serif style (2–10 serif, 11–15 sans; family kind 3–5 = `other`). Else `other`.
+  - `spacing` (`mono`, `proportional`): equal advance widths of `i l m M W` (at least 2 present), else `post.isFixedPitch`.
+  - `variable` (`true`, `false`): an `fvar` table.
+- **Add a facet:** write a struct that implements `Analyzer` (key, values, analyze) with tests, and add it to `ANALYZERS`. The query parser, the error messages, and the search use that list.
+- **Search rules** (`query.rs`, `tree.rs`): a term `key:value` with a known key is a facet term (case-insensitive, exact value); other terms with `:` are text. A missing or unknown value matches nothing and shows `Type a value for class: serif, sans, other.` or `Unknown value "x" for class. Use ...` in the message line until the search is valid again (`App::search_error`). Facet terms apply to files only: files that do not match are hidden everywhere, also under a folder that matches the text, and folders with no matching file are hidden. Without text terms, folders do not match themselves, so the matching files show with their folders opened.
+- **Measured (November 2026)** on a real Fonts folder: the shape rule agrees with PANOSE on 98.8% of the files that have PANOSE values, and takes about 2 µs per file. Most files have no PANOSE serif style and no `sFamilyClass`, so metadata alone is not enough.
+- **Scale test:** `cargo test --release --test scale -- --ignored --nocapture`. 50,000 generated fonts: facets about 75 ms on one thread, full scan about 1 s.
+- Test fonts: `testing::FontSpec` (`sans`, `serif`, `.monospaced()`, `.variable()`, `.panose()`, `.fixed_pitch()`, `.glyphs()`) builds fonts with rectangle glyphs.
 
 ## Facts about a real Fonts folder
 

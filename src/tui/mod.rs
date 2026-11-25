@@ -8,6 +8,7 @@ use crate::activator::FontActivator;
 use crate::app::{Context, MissingEntry, Owner};
 use crate::collections::{self, Collection};
 use crate::entry;
+use crate::query::Query;
 use crate::settings::{ConfigDir, Settings};
 use crate::sync;
 use crate::tree::{Kind, ROOT, Row, Tree};
@@ -97,6 +98,8 @@ pub struct App {
     /// True while the user types a search query.
     pub searching: bool,
     pub message: Option<String>,
+    /// The error of the current search query, if the message line shows it.
+    search_error: Option<String>,
     pub input: Option<Input>,
     pub picker: Option<Picker>,
     /// The ID of the collection that the font tree edits. `None`: the tree edits the personal settings.
@@ -151,6 +154,7 @@ impl App {
             search: String::new(),
             searching: false,
             message: None,
+            search_error: None,
             input: None,
             picker: None,
             editing: None,
@@ -436,10 +440,17 @@ impl App {
         }
     }
 
+    /// Sets the search and filters the rows. An error in a facet term shows in the message line
+    /// until the search is valid again.
     fn set_search(&mut self, search: String) {
         self.search = search;
         self.refresh_rows();
         self.font_list.select((!self.rows.is_empty()).then_some(0));
+        let error = Query::parse(&self.search).error;
+        if error.is_some() || (self.search_error.is_some() && self.message == self.search_error) {
+            self.message = error.clone();
+        }
+        self.search_error = error;
     }
 
     /// The node of the selected row in the Fonts tab.
@@ -996,6 +1007,57 @@ mod tests {
 
         press(&mut app, KeyCode::Backspace);
         assert_eq!(app.search, "an");
+    }
+
+    #[test]
+    fn a_search_filters_by_facets() {
+        let f = fixture();
+        let mut app = open(&f);
+
+        press(&mut app, KeyCode::Char('/'));
+        type_text(&mut app, "ant class:other spacing:proportional");
+
+        let names: Vec<_> = app.rows.iter().map(|r| app.tree.nodes[r.node].name.as_str()).collect();
+        assert_eq!(names, ["Foundry B", "Antiqua.otf"]);
+        assert_eq!(app.message, None);
+
+        press(&mut app, KeyCode::Char('x'));
+        assert!(app.rows.is_empty());
+    }
+
+    #[test]
+    fn a_facet_without_a_valid_value_shows_the_values_in_the_message_line() {
+        let f = fixture();
+        let mut app = open(&f);
+        press(&mut app, KeyCode::Char('/'));
+
+        type_text(&mut app, "class:");
+        assert_eq!(app.message.as_deref(), Some("Type a value for class: serif, sans, other."));
+        assert!(app.rows.is_empty());
+
+        type_text(&mut app, "o");
+        assert_eq!(app.message.as_deref(), Some("Unknown value \"o\" for class. Use serif, sans, other."));
+
+        type_text(&mut app, "ther");
+        assert_eq!(app.message, None);
+        assert!(!app.rows.is_empty());
+
+        type_text(&mut app, " spacing:");
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.message, None);
+    }
+
+    #[test]
+    fn a_search_without_facet_errors_keeps_other_messages() {
+        let f = fixture();
+        let mut app = open(&f);
+        app.message = Some("Registered 1, unregistered 0.".into());
+
+        press(&mut app, KeyCode::Char('/'));
+        type_text(&mut app, "ant");
+        press(&mut app, KeyCode::Esc);
+
+        assert_eq!(app.message.as_deref(), Some("Registered 1, unregistered 0."));
     }
 
     #[test]

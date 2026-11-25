@@ -46,7 +46,7 @@ mod tests {
     }
 
     fn font(id: &str, faces: Vec<Face>) -> FontFile {
-        FontFile { id: id.into(), faces, error: None }
+        FontFile { id: id.into(), faces, facets: vec![], error: None }
     }
 
     fn library(mut fonts: Vec<FontFile>) -> Library {

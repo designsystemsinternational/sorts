@@ -20,6 +20,9 @@ pub struct FontFile {
     /// Path relative to the Fonts root, with `/` separators. This is the font ID.
     pub id: String,
     pub faces: Vec<Face>,
+    /// The value of each facet analyzer for the first face, in the order of
+    /// [`facets::ANALYZERS`](crate::facets::ANALYZERS). Empty if the file could not be read.
+    pub facets: Vec<&'static str>,
     /// Set when the file could not be read as a font.
     pub error: Option<String>,
 }
@@ -48,6 +51,13 @@ impl Library {
     pub fn get(&self, id: &str) -> Option<&FontFile> {
         self.fonts.binary_search_by(|f| f.id.as_str().cmp(id)).ok().map(|i| &self.fonts[i])
     }
+}
+
+/// Reads the faces of a font or font collection, and the facets of the first face.
+pub fn read_font(data: &[u8]) -> Result<(Vec<Face>, Vec<&'static str>), String> {
+    let faces = read_faces(data)?;
+    let first = ttf_parser::Face::parse(data, 0).map_err(|e| e.to_string())?;
+    Ok((faces, crate::facets::analyze(&first)))
 }
 
 /// Reads the faces of a font or font collection.
@@ -173,15 +183,15 @@ pub fn scan_with(root: &Path, options: &ScanOptions) -> std::io::Result<Library>
         .into_par_iter()
         .map(|(id, online_only)| {
             (options.progress)(ScanEvent::ReadStart { id: id.clone() });
-            let result = fs::read(root.join(&id)).map_err(|e| e.to_string()).and_then(|d| read_faces(&d));
+            let result = fs::read(root.join(&id)).map_err(|e| e.to_string()).and_then(|d| read_font(&d));
             (options.progress)(ScanEvent::Read {
                 id: id.clone(),
                 downloaded: online_only,
                 error: result.clone().err(),
             });
             match result {
-                Ok(faces) => FontFile { id, faces, error: None },
-                Err(error) => FontFile { id, faces: vec![], error: Some(error) },
+                Ok((faces, facets)) => FontFile { id, faces, facets, error: None },
+                Err(error) => FontFile { id, faces: vec![], facets: vec![], error: Some(error) },
             }
         })
         .collect();
@@ -213,6 +223,28 @@ mod tests {
         .unwrap();
         let names: Vec<_> = faces.iter().map(|f| f.postscript.as_str()).collect();
         assert_eq!(names, ["Helvetica-Regular", "Helvetica-Bold"]);
+    }
+
+    #[test]
+    fn the_scan_reads_the_facets_of_the_first_face() {
+        let root = tempfile::tempdir().unwrap();
+        let names = FaceNames::from_postscript;
+        write_spec(root.path(), "A/Serif.otf", &FontSpec::serif(names("Serif-Regular")).variable());
+        write_file(
+            root.path(),
+            "A/Family.ttc",
+            &collection_spec_bytes(&[
+                FontSpec::sans(names("Family-Regular")).monospaced(),
+                FontSpec::serif(names("Family-Bold")),
+            ]),
+        );
+        write_file(root.path(), "A/Broken.ttf", b"not a font");
+
+        let library = scan(root.path()).unwrap();
+
+        assert_eq!(library.get("A/Serif.otf").unwrap().facets, ["serif", "proportional", "true"]);
+        assert_eq!(library.get("A/Family.ttc").unwrap().facets, ["sans", "mono", "false"]);
+        assert!(library.get("A/Broken.ttf").unwrap().facets.is_empty());
     }
 
     #[test]
@@ -387,7 +419,7 @@ mod tests {
 
     #[test]
     fn extension_is_lowercase() {
-        let font = FontFile { id: "A/B.OTF".into(), faces: vec![], error: None };
+        let font = FontFile { id: "A/B.OTF".into(), faces: vec![], facets: vec![], error: None };
         assert_eq!(font.extension(), "otf");
     }
 }

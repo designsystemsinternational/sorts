@@ -80,6 +80,22 @@ sorts
 | `tab` `shift-tab` | Switch tabs                       | Switch tabs                        |
 | `ctrl-c` / `esc`  | Quit                              | Quit                               |
 
+The search shows only the fonts that match all words. A word can also be a
+filter in the form `key:value`:
+
+| Filter     | Values                   |
+| ---------- | ------------------------ |
+| `class`    | `serif`, `sans`, `other` |
+| `spacing`  | `mono`, `proportional`   |
+| `variable` | `true`, `false`          |
+
+For example, `/ grotesk class:sans spacing:mono` shows the monospaced sans
+fonts with "grotesk" in their name or folder. sorts calculates these values
+from each font file every time it loads the fonts. It reads the shape of the
+letters `H` and `I` (serifs or no serifs) and the widths of some letters (mono
+or proportional). The result can be wrong for unusual fonts. Fonts that are not
+clearly serif or sans are `other`.
+
 Marks:
 
 - `[x]` enabled

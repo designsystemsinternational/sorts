@@ -56,6 +56,7 @@ mod tests {
                 .iter()
                 .map(|ps| Face { family: String::new(), style: String::new(), postscript: ps.to_string() })
                 .collect(),
+            facets: vec![],
             error: None,
         }
     }

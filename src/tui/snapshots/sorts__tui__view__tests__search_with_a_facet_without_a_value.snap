@@ -1,0 +1,16 @@
+---
+source: src/tui/view.rs
+expression: draw(&mut app)
+---
+" Fonts   Collections   Settings    / regular spacing:_                          "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" Type a value for spacing: mono, proportional.                                  "
+" Type : Search | Enter : Done | Esc : Clear                                     "

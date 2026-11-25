@@ -1,6 +1,7 @@
 //! The folder tree of the library, used by the interactive list.
 
 use crate::entry;
+use crate::query::Query;
 use crate::scan::Library;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -26,6 +27,17 @@ pub struct Node {
     /// Indices into `Library::fonts` of all fonts in this node. Contiguous because the
     /// library is sorted by ID and all IDs in a folder share the folder's prefix.
     pub fonts: Range<usize>,
+}
+
+/// How a node matches a search query.
+#[derive(Debug, Clone, Copy)]
+struct Match {
+    /// The node matches the query itself.
+    own: bool,
+    /// A node below it matches the query.
+    below: bool,
+    /// The node matches the facets (a folder: a file below it does).
+    visible: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -89,35 +101,52 @@ impl Tree {
     /// automatically, and shows all its children when the user expands it.
     ///
     /// A folder matches on its path. A file matches on its ID, family names, and PostScript names.
+    /// Facet terms (`class:serif`, see [`Query`]) apply to files only: files that do not match
+    /// them are hidden everywhere, also under a folder that matches the text, and so are
+    /// folders that contain no file that matches them.
     pub fn rows(&self, library: &Library, expanded: &HashSet<usize>, query: &str) -> Vec<Row> {
-        let filter = (!query.trim().is_empty()).then(|| self.matches(library, query));
+        let query = Query::parse(query);
+        let filter = (!query.is_empty()).then(|| self.matches(library, &query));
         let mut rows = Vec::new();
         self.walk(ROOT, 0, expanded, filter.as_ref(), true, &mut rows);
         rows
     }
 
-    /// Per node: (the node matches the query, a node below it matches the query).
-    fn matches(&self, library: &Library, query: &str) -> Vec<(bool, bool)> {
-        let mut result: Vec<(bool, bool)> = self
+    /// Per node: whether it matches the query, and whether a node below it matches.
+    fn matches(&self, library: &Library, query: &Query) -> Vec<Match> {
+        // A file is visible if it matches the facets. A folder is visible if a file below it is.
+        let mut visible: Vec<bool> = self
             .nodes
             .iter()
-            .map(|node| {
-                let text = match node.kind {
-                    Kind::Folder => node.path.clone(),
-                    Kind::File => {
-                        let font = &library.fonts[node.fonts.start];
-                        let names = font.faces.iter().map(|f| format!("{} {}", f.family, f.postscript));
-                        std::iter::once(font.id.clone()).chain(names).collect::<Vec<_>>().join(" ")
-                    }
-                };
-                (node.parent.is_some() && matches_query(&text, query), false)
-            })
+            .map(|node| node.kind == Kind::File && query.matches_facets(&library.fonts[node.fonts.start]))
             .collect();
         // Children always come after their parent, so a reverse pass sees children first.
         for index in (1..self.nodes.len()).rev() {
-            let (own, below) = result[index];
+            if visible[index] {
+                visible[self.nodes[index].parent.expect("only the root has no parent")] = true;
+            }
+        }
+        let mut result: Vec<Match> = self
+            .nodes
+            .iter()
+            .zip(&visible)
+            .map(|(node, &visible)| {
+                let own = match node.kind {
+                    // Without text terms, folders do not match themselves: the facets select files.
+                    Kind::Folder => !query.terms.is_empty() && query.matches_text(&node.path),
+                    Kind::File => {
+                        let font = &library.fonts[node.fonts.start];
+                        let names = font.faces.iter().map(|f| format!("{} {}", f.family, f.postscript));
+                        query.matches_text(&std::iter::once(font.id.clone()).chain(names).collect::<Vec<_>>().join(" "))
+                    }
+                };
+                Match { own: node.parent.is_some() && visible && own, below: false, visible }
+            })
+            .collect();
+        for index in (1..self.nodes.len()).rev() {
+            let Match { own, below, .. } = result[index];
             if own || below {
-                result[self.nodes[index].parent.expect("only the root has no parent")].1 = true;
+                result[self.nodes[index].parent.expect("only the root has no parent")].below = true;
             }
         }
         result
@@ -128,18 +157,18 @@ impl Tree {
         node: usize,
         depth: usize,
         expanded: &HashSet<usize>,
-        filter: Option<&Vec<(bool, bool)>>,
+        filter: Option<&Vec<Match>>,
         filtered: bool,
         rows: &mut Vec<Row>,
     ) {
         for &child in &self.nodes[node].children {
-            let (own, below) = filter.map_or((true, false), |m| m[child]);
-            if filtered && !own && !below {
+            let found = filter.map_or(Match { own: true, below: false, visible: true }, |m| m[child]);
+            if !found.visible || (filtered && !found.own && !found.below) {
                 continue;
             }
             rows.push(Row { node: child, depth });
             if self.nodes[child].kind == Kind::Folder {
-                if filter.is_some() && filtered && !own {
+                if filter.is_some() && filtered && !found.own {
                     self.walk(child, depth + 1, expanded, filter, true, rows);
                 } else if expanded.contains(&child) {
                     self.walk(child, depth + 1, expanded, filter, false, rows);
@@ -195,12 +224,6 @@ fn push(nodes: &mut Vec<Node>, kind: Kind, name: &str, path: String, parent: usi
     index
 }
 
-/// True if every search term is in the text (case-insensitive).
-pub fn matches_query(text: &str, query: &str) -> bool {
-    let text = text.to_lowercase();
-    query.to_lowercase().split_whitespace().all(|term| text.contains(term))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,6 +237,7 @@ mod tests {
                 FontFile {
                     id: id.to_string(),
                     faces: vec![Face { family: format!("{ps} Family"), style: "Regular".into(), postscript: ps }],
+                    facets: vec![],
                     error: None,
                 }
             })
@@ -333,6 +357,79 @@ mod tests {
 
         let rows = tree.rows(&library, &HashSet::new(), "foundry");
         assert_eq!(paths(&tree, &rows), ["Foundry A", "Foundry B"]);
+    }
+
+    /// The sample library with facets: the Serif and Antiqua fonts are serif, Mono is
+    /// monospaced, and Readme could not be read.
+    fn sample_with_facets() -> Library {
+        let mut library = sample();
+        for font in &mut library.fonts {
+            font.facets = match font.id.rsplit('/').next().unwrap() {
+                "Serif-Regular.otf" | "Antiqua.otf" => vec!["serif", "proportional", "false"],
+                "Mono-Regular.otf" => vec!["sans", "mono", "false"],
+                "Readme.otf" => vec![],
+                _ => vec!["sans", "proportional", "false"],
+            };
+        }
+        library
+    }
+
+    #[test]
+    fn a_facet_search_shows_only_matching_files_with_their_folders() {
+        let library = sample_with_facets();
+        let tree = Tree::build(&library);
+
+        let rows = tree.rows(&library, &HashSet::new(), "class:serif");
+
+        assert_eq!(
+            paths(&tree, &rows),
+            ["Foundry A", "  Serif", "    Serif-Regular.otf", "Foundry B", "  Antiqua.otf"]
+        );
+    }
+
+    #[test]
+    fn a_search_combines_text_and_facets() {
+        let library = sample_with_facets();
+        let tree = Tree::build(&library);
+
+        let rows = tree.rows(&library, &HashSet::new(), "regular class:sans");
+        assert_eq!(
+            paths(&tree, &rows),
+            ["Foundry A", "  Sans", "    Sans-Regular.otf", "Foundry B", "  Mono", "    Mono-Regular.otf"]
+        );
+
+        let rows = tree.rows(&library, &HashSet::new(), "Regular spacing:mono");
+        assert_eq!(paths(&tree, &rows), ["Foundry B", "  Mono", "    Mono-Regular.otf"]);
+    }
+
+    #[test]
+    fn a_folder_that_matches_the_text_shows_only_children_that_match_the_facets() {
+        let library = sample_with_facets();
+        let tree = Tree::build(&library);
+
+        let rows = tree.rows(&library, &HashSet::new(), "foundry class:serif");
+        assert_eq!(paths(&tree, &rows), ["Foundry A", "Foundry B"]);
+
+        let open = expanded(&tree, &["Foundry A/", "Foundry A/Serif/", "Foundry A/Sans/"]);
+        let rows = tree.rows(&library, &open, "foundry class:serif");
+        assert_eq!(paths(&tree, &rows), ["Foundry A", "  Serif", "    Serif-Regular.otf", "Foundry B"]);
+    }
+
+    #[test]
+    fn a_folder_that_matches_the_text_but_has_no_matching_fonts_is_hidden() {
+        let library = sample_with_facets();
+        let tree = Tree::build(&library);
+
+        assert!(tree.rows(&library, &HashSet::new(), "sans class:serif").is_empty());
+    }
+
+    #[test]
+    fn a_search_with_an_unknown_facet_value_shows_nothing() {
+        let library = sample_with_facets();
+        let tree = Tree::build(&library);
+
+        assert!(tree.rows(&library, &HashSet::new(), "regular class:ser").is_empty());
+        assert!(tree.rows(&library, &HashSet::new(), "class:").is_empty());
     }
 
     #[test]

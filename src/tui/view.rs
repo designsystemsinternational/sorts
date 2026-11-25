@@ -439,6 +439,15 @@ mod tests {
     }
 
     #[test]
+    fn search_with_a_facet_without_a_value() {
+        let f = fixture();
+        let mut app = open(&f);
+        press(&mut app, KeyCode::Char('/'));
+        type_text(&mut app, "regular spacing:");
+        insta::assert_snapshot!(draw(&mut app));
+    }
+
+    #[test]
     fn search_kept_after_enter() {
         let f = fixture();
         let mut app = open(&f);
